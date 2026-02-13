@@ -10,11 +10,26 @@ from datetime import datetime
 # For simplicity in this environment, we'll try to use a standard Japanese font path if it exists,
 # but for robust code we'll fallback to a basic placeholder if fonts aren't found.
 def setup_fonts():
-    # Common Windows Japanese font path
+    # 1. Try local project font (Best for Streamlit Cloud)
+    # Using Sawarabi Gothic (Safe TTF)
+    project_font = os.path.join(os.path.dirname(__file__), "fonts", "SawarabiGothic-Regular.ttf")
+    if os.path.exists(project_font):
+        try:
+            pdfmetrics.registerFont(TTFont('SawarabiGothic', project_font))
+            return 'SawarabiGothic'
+        except Exception as e:
+            print(f"Failed to load project font: {e}")
+
+    # 2. Common Windows Japanese font path (Fallback for local dev)
     font_path = "C:/Windows/Fonts/msgothic.ttc"
     if os.path.exists(font_path):
-        pdfmetrics.registerFont(TTFont('Gothic', font_path))
-        return 'Gothic'
+        try:
+            pdfmetrics.registerFont(TTFont('Gothic', font_path))
+            return 'Gothic'
+        except Exception:
+            pass
+
+    # 3. Fallback
     return 'Helvetica'
 
 def create_invoice(tenant_data, output_path):
