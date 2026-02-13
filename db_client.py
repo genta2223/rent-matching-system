@@ -1,16 +1,28 @@
 import os
 import requests
 import pandas as pd
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Try loading .env for local development (skip silently on cloud)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+# Read credentials: st.secrets (Streamlit Cloud) → os.environ (.env / local)
+def _get_secret(key):
+    try:
+        import streamlit as st
+        return st.secrets.get(key)
+    except Exception:
+        pass
+    return os.environ.get(key)
+
+SUPABASE_URL = _get_secret("SUPABASE_URL")
+SUPABASE_KEY = _get_secret("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in .env file")
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in .env or Streamlit secrets")
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
