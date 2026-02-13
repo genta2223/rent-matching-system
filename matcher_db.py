@@ -43,6 +43,11 @@ def normalize_month(ts):
     if pd.isna(ts): return ts
     return pd.Timestamp(year=ts.year, month=ts.month, day=1)
 
+def clean_pid(val):
+    if pd.isna(val): return ""
+    v = str(val).split('.')[0] # Remove .0
+    return v.strip() if v else ""
+
 class TenantRecordDB:
     def __init__(self, data):
         # Expecting Supabase column names
@@ -69,14 +74,27 @@ class TenantRecordDB:
         self.zip = str(data.get('Zip', ""))
         self.address = str(data.get('Address', ""))
         
-        # Access nested values if they exist in 'Values' or top level if migrated differently
-        # For now assuming 'Values' holds the extra fields as per migration script
         self.agent = values.get('Agent', '')
         self.manager = values.get('Manager', '')
+
+        # Handle separate management flag
+        raw_mgmt = data.get('SeparateAccountManagement')
+        if raw_mgmt is None:
+            raw_mgmt = values.get('SeparateAccountManagement', '0')
         
-        self.memo = data.get('Memo', "")
+        try:
+            # Handles 1, 1.0, "1", "1.0", True, "true"
+            f_val = float(raw_mgmt)
+            self.separate_mgmt = (f_val == 1.0)
+        except:
+            raw_mgmt_str = str(raw_mgmt).strip().lower()
+            self.separate_mgmt = (raw_mgmt_str.startswith('1') or raw_mgmt_str == 'true')
+        
+        raw_memo = data.get('Memo')
+        self.memo = str(raw_memo) if raw_memo is not None else ""
         
         raw_delinq = data.get('LatestPaymentMemo')
+        self.delinquency_memo = str(raw_delinq) if raw_delinq is not None else ""
         if raw_delinq is None:
             self.delinquency_memo = ""
         else:
@@ -99,24 +117,92 @@ class TenantRecordDB:
         self.debts = [] 
 
     def calculate_debts(self, target_date):
+        """Initialize debts using BaseDebt columns if available, otherwise fallback to memo."""
         target_normalized = normalize_month(target_date)
+        
+        # Prioritize "ok" memo if it exists and is fresh
+        is_ok = self.delinquency_memo.strip().lower().startswith('ok')
+        if is_ok:
+             # If "ok", treat as paid up to next month
+             self.memo_anchor_date = target_normalized + relativedelta(months=1)
+             limit_start = target_normalized - relativedelta(months=8)
+             calc_start = max(normalize_month(self.initial_date), limit_start)
+             curr = calc_start
+             limit_end = target_normalized + relativedelta(months=1)
+             while curr <= limit_end:
+                 # Everything up to anchor is paid
+                 paid_init = self.rent if curr <= self.memo_anchor_date else 0.0
+                 self.debts.append({'month': curr, 'amount': self.rent, 'paid': paid_init, 'is_carry_over': False})
+                 curr += relativedelta(months=1)
+             return
+
+        # --- PHASE 1: Data-Driven + Memo-Enhanced Calculation ---
         if self.base_debt_date:
             self.memo_anchor_date = self.base_debt_date
+            
+            # Parse LatestPaymentMemo for descriptive labels on pre-cutoff payments
+            self.memo_paid_map = {}
+            memo_text = self.delinquency_memo or ''
+            
+            # Extract first date-delimited section (most recent memo entry)
+            sections = re.split(r"(\d{4}[/-]\d{1,2}[/-]\d{1,2})", memo_text)
+            parse_text = memo_text
+            if len(sections) >= 3:
+                parse_text = sections[0] + sections[1] + sections[2]
+            
+            # Parse "X月分全額" or "X月分全額充当" 
+            full_paid = re.findall(r"(?:(\d{4})年)?(\d{1,2})月分(?:全額|全額充当)", parse_text)
+            for y_str, m_str in full_paid:
+                m_val = int(m_str)
+                if y_str:
+                    t = pd.Timestamp(year=int(y_str), month=m_val, day=1)
+                else:
+                    y = target_date.year
+                    if m_val > target_date.month + 2:
+                        y -= 1
+                    t = pd.Timestamp(year=y, month=m_val, day=1)
+                self.memo_paid_map[t] = self.rent
+            
+            # Parse "X月分のうちN円"
+            partial_paid = re.findall(r"(?:(\d{4})年)?(\d{1,2})月分のうち(\d+)円", parse_text)
+            for y_str, m_str, amt in partial_paid:
+                m_val = int(m_str)
+                if y_str:
+                    t = pd.Timestamp(year=int(y_str), month=m_val, day=1)
+                else:
+                    y = target_date.year
+                    if m_val > target_date.month + 2:
+                        y -= 1
+                    t = pd.Timestamp(year=y, month=m_val, day=1)
+                if t not in self.memo_paid_map:
+                    self.memo_paid_map[t] = float(amt)
+            
+            # Debts start from BaseDebtDate's month:
+            # If BaseDebtDate is on the 1st (e.g. 2025-11-01), debts start from that month (Nov)
+            # If BaseDebtDate is mid/end of month (e.g. 2025-10-31), debts start from next month (Nov)
+            if self.base_debt_date.day == 1:
+                start_month = normalize_month(self.base_debt_date)
+            else:
+                start_month = normalize_month(self.base_debt_date + relativedelta(months=1))
+            
+            # Add carry-over debt (outstanding amount at BaseDebtDate)
             if self.base_debt_amount > 0:
                 self.debts.append({
-                    'month': self.base_debt_date, 
+                    'month': normalize_month(self.base_debt_date),
                     'amount': self.base_debt_amount, 
                     'paid': 0.0,
                     'is_carry_over': True
                 })
-            curr = normalize_month(self.base_debt_date + relativedelta(months=1))
+            
+            # Generate monthly debts from start_month through next month
+            curr = start_month
             limit_end = target_normalized + relativedelta(months=1)
             while curr <= limit_end:
                 self.debts.append({'month': curr, 'amount': self.rent, 'paid': 0.0, 'is_carry_over': False})
                 curr += relativedelta(months=1)
             return
 
-        # --- PHASE 2: Fallback to Memo-Based Parsing (Restored Logic) ---
+        # --- PHASE 2: Fallback to Memo-Based Parsing ---
         limit_start = target_normalized - relativedelta(months=8)
         calc_start = max(normalize_month(self.initial_date), limit_start)
         
@@ -186,31 +272,34 @@ class TenantRecordDB:
             self.debts.append({'month': curr, 'amount': self.rent, 'paid': paid_init, 'is_carry_over': False})
             curr += relativedelta(months=1)
 
-
     def allocate_payments(self):
+        """FIFO allocation: payments after base_debt_date get full FIFO allocation.
+        Payments before base_debt_date are skipped (already covered older debts)."""
         self.ledger_payments.sort(key=lambda x: x['Date'])
-        # Simplified allocation logic prioritizing BaseDebtDate
+        # Use base_debt_date as cutoff — payments before this date covered older months
         cutoff_date = self.base_debt_date.date() if self.base_debt_date else None
-        
+
         for p in self.ledger_payments:
             p['Allocations'] = []
             p['Surplus'] = 0.0
             p['AllocationDesc'] = ""
-            
-            if cutoff_date and p['Date'].date() <= cutoff_date:
-                p['AllocationDesc'] = "記録済み"
+
+            # Skip payments before base_debt_date (they covered months before debt start)
+            if cutoff_date and p['Date'].date() < cutoff_date:
+                p['AllocationDesc'] = "処理済み入金"
                 continue
 
-            amount_to_alloc = p['Amount']
+            # FIFO allocation for post-cutoff payments
+            amount_to_alloc = float(p['Amount'])
             alloc_parts = []
             for d in self.debts:
-                if d['paid'] < d['amount']:
-                    needed = d['amount'] - d['paid']
+                if float(d['paid']) < float(d['amount']):
+                    needed = float(d['amount']) - float(d['paid'])
                     alloc = min(needed, amount_to_alloc)
                     if alloc > 0:
-                        d['paid'] += float(alloc)
-                        amount_to_alloc -= float(alloc)
-                        is_full = d['paid'] >= d['amount']
+                        d['paid'] = float(d['paid']) + alloc
+                        amount_to_alloc -= alloc
+                        is_full = float(d['paid']) >= float(d['amount'])
                         ts = pd.Timestamp(d['month'])
                         desc_month = "前月以前残高" if d.get('is_carry_over') else ts.strftime('%Y年%m月分')
                         type_str = "全額" if is_full else "一部"
@@ -236,39 +325,52 @@ class TenantRecordDB:
         next_month = normalize_month(today + relativedelta(months=1))
         total_due = self.get_total_overdue(next_month)
         
-        # Format History
+        # Format History — Rule②: only show months where unpaid > 0
+        #                  Rule③: include up to next month
         history = []
         for d in self.debts:
-             history.append({
-                 'month': d['month'],
-                 'amount': d['amount'],
-                 'paid': d['paid']
-             })
+            # Skip months beyond next month
+            if d['month'] > next_month:
+                continue
+            unpaid = float(d['amount']) - float(d['paid'])
+            # Rule②: Only include months with outstanding balance
+            if unpaid <= 0:
+                continue
+            history.append({
+                'month': d['month'].strftime('%Y-%m-%d'),
+                'amount': int(d['amount']),
+                'paid': int(d['paid'])
+            })
         
-        # Format Ledger History
+        # Format Ledger History — last 6 payments with allocation descriptions
         ledger_hist = []
-        for lp in self.ledger_payments[-6:]: # Last 6 payments
-             if not lp.get('Allocations'): continue
+        for lp in self.ledger_payments[-6:]:
+             desc = str(lp.get('AllocationDesc', '') or '')
+             if not desc:
+                 continue
              ledger_hist.append({
                  'Date': lp['Date'],
                  'Amount': lp['Amount'],
-                 'AllocationDesc': lp.get('AllocationDesc', '')
+                 'AllocationDesc': desc
              })
-        ledger_hist.sort(key=lambda x: x['Date'], reverse=True)
-         
         return {
             'Zip': self.zip,
             'Address': self.address,
             'Name': self.name,
             'PropertyID': self.property_id,
-            'TotalDue': total_due,
-            'History': history[-12:], # Last 12 months debt history
-            'LedgerHistory': ledger_hist
+            'TotalDue': int(total_due),
+            'RawPaymentsCount': len(self.ledger_payments),
+            'History': history[::-1], # Newest first
+            'LedgerHistory': ledger_hist[::-1] # Newest first
         }
 
 class LogicEngine:
     def __init__(self, tenants_df, ledger_df):
         self.tenants_df = tenants_df
+        # Ensure ledger_df PropertyID is always string for matching
+        if not ledger_df.empty and 'PropertyID' in ledger_df.columns:
+            ledger_df = ledger_df.copy()
+            ledger_df['PropertyID'] = ledger_df['PropertyID'].astype(str).str.split('.').str[0].str.strip()
         self.ledger_df = ledger_df
         
     def get_invoice_data(self, target_ids=None, only_overdue=True):
@@ -287,13 +389,17 @@ class LogicEngine:
         for _, row in self.tenants_df.iterrows():
             t = TenantRecordDB(row)
             
-            # Skip separate management properties (e.g. Prop 11)
+            # Skip separate management properties (e.g. Prop 10, 11)
             if t.separate_mgmt:
                 continue
                 
-            room_payments = [p for p in ledger_records if str(p.get('PropertyID')) == t.property_id]
+            t_pid = clean_pid(t.property_id)
+            # Both sides are now guaranteed to be clean strings
+            room_payments = [p for p in ledger_records if str(p.get('PropertyID')) == t_pid]
             for p in room_payments:
-                t.ledger_payments.append({'Date': pd.to_datetime(p['Date']), 'Amount': p['Amount']})
+                p_entry = p.copy()
+                p_entry['Date'] = pd.to_datetime(p['Date'])
+                t.ledger_payments.append(p_entry)
             
             t.calculate_debts(today)
             t.allocate_payments()
@@ -301,9 +407,11 @@ class LogicEngine:
             # Filtering Logic
             is_target = False
             
+            clean_t_pid = clean_pid(t.property_id)
             if target_ids is not None:
-                # Custom selection mode
-                if t.property_id in target_ids:
+                # Custom selection mode - ensure target_ids are also cleaned for comparison
+                clean_targets = [clean_pid(tid) for tid in target_ids] if target_ids else []
+                if clean_t_pid in clean_targets:
                     is_target = True
             elif only_overdue:
                 # Overdue only mode
@@ -319,27 +427,52 @@ class LogicEngine:
                 
         return invoices
 
-    def match_new_bank_data(self, bank_df):
+    def match_new_bank_data(self, bank_df, mapping=None):
         """
         Matches bank CSV data to tenants using the logic.
         Returns:
             new_ledger_entries (list of dict): Rows to be added AND inserted to DB.
         """
+        if mapping is None:
+            # Fallback to Resona default if no mapping provided
+            from matcher_db import BankMapper
+            mapping = BankMapper.suggest_mapping(bank_df)
+            
         new_ledger_entries = []
         used_keys = set(self.ledger_df['TransactionKey'].tolist()) if 'TransactionKey' in self.ledger_df.columns else set()
         
         for _, tx in bank_df.iterrows():
-            tx_key = generate_tx_key(tx)
+            # Get values based on mapping
+            sender_col = mapping.get('sender')
+            amount_col = mapping.get('amount')
+            date_cols = mapping.get('date', [])
+            type_col = mapping.get('type')
+            
+            # Basic validation
+            if not sender_col or not amount_col or not date_cols:
+                continue
+                
+            # Filter by type if available (e.g. only "入金")
+            if type_col:
+                t_val = str(tx.get(type_col, ''))
+                if "入金" not in t_val and "振込" not in t_val:
+                    # Heuristic: if it's not clear, we might be skipping "支払"
+                    if "払" in t_val or "出" in t_val:
+                        continue
+
+            summary_raw = str(tx.get(sender_col, ''))
+            summary = normalize_name(summary_raw)
+            amount = tx.get(amount_col, 0)
+            
+            # Generate tx_key (still needs a stable way, using the raw row values for now)
+            # To keep it compatible with existing Resona logic, we might need a more generic generate_tx_key
+            tx_key = self._generate_flexible_tx_key(tx, mapping)
             if tx_key in used_keys: continue
             
-            summary_raw = str(tx.get('摘要', ''))
-            summary = normalize_name(summary_raw)
-            amount = tx.get('金額', 0)
             matched_room = None
             
             # Match Logic
             for _, row in self.tenants_df.iterrows():
-                # Values is dict if loaded from DB
                 values = row.get('Values', {})
                 if not isinstance(values, dict): values = {}
                 cands = [
@@ -352,24 +485,36 @@ class LogicEngine:
                     break
             
             if matched_room:
-                try:
-                    y = tx.get('取扱日付　年') or tx.get('年')
-                    m = tx.get('取扱日付　月') or tx.get('月')
-                    d = tx.get('取扱日付　日') or tx.get('日')
-                    payment_date = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-                except:
-                    payment_date = datetime.now().strftime("%Y-%m-%d")
+                 # Extract Date
+                 try:
+                     if len(date_cols) == 3:
+                         y = tx.get(date_cols[0])
+                         m = tx.get(date_cols[1])
+                         d = tx.get(date_cols[2])
+                         payment_date = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+                     else:
+                         payment_date = pd.to_datetime(tx.get(date_cols[0])).strftime("%Y-%m-%d")
+                 except:
+                     payment_date = datetime.now().strftime("%Y-%m-%d")
 
-                new_ledger_entries.append({
-                    'PropertyID': matched_room,
-                    'Date': payment_date, # DB column is Date, originally PaymentDate in CSV. DB schema uses "Date"
-                    'Amount': amount,
-                    'Summary': summary_raw,
-                    'TransactionKey': tx_key
-                })
-                used_keys.add(tx_key)
-                
+                 new_ledger_entries.append({
+                     'PropertyID': matched_room,
+                     'Date': payment_date,
+                     'Amount': amount,
+                     'Summary': summary_raw,
+                     'TransactionKey': tx_key
+                 })
+                 used_keys.add(tx_key)
+                 
         return new_ledger_entries
+
+    def _generate_flexible_tx_key(self, row, mapping):
+        # Concatenate mapping-relevant values to create a stable key
+        sender = str(row.get(mapping.get('sender'), ''))
+        amount = str(row.get(mapping.get('amount'), '0'))
+        date_str = "".join([str(row.get(c, '')) for c in mapping.get('date', [])])
+        raw = f"{date_str}{sender}{amount}"
+        return hashlib.md5(raw.encode('cp932', errors='replace')).hexdigest()
 
     def process_status(self):
         """
@@ -386,12 +531,19 @@ class LogicEngine:
         for _, row in self.tenants_df.iterrows():
             t = TenantRecordDB(row)
             
+            # Skip separate management
+            if t.separate_mgmt:
+                continue
+            
             # Filter payments for this tenant
-            # Ensure type matching for PropertyID
-            room_payments = [p for p in ledger_records if str(p.get('PropertyID')) == t.property_id]
+            # ledger_df PropertyID is already cleaned in __init__
+            t_pid = clean_pid(t.property_id)
+            room_payments = [p for p in ledger_records if str(p.get('PropertyID')) == t_pid]
             
             for p in room_payments:
-                t.ledger_payments.append({'Date': pd.to_datetime(p['Date']), 'Amount': p['Amount']})
+                p_entry = p.copy()
+                p_entry['Date'] = pd.to_datetime(p['Date'])
+                t.ledger_payments.append(p_entry)
             
             t.calculate_debts(today)
             t.allocate_payments()
@@ -403,10 +555,55 @@ class LogicEngine:
             results.append({
                 'PropertyID': t.property_id,
                 'Name': t.name,
-                'Rent': t.rent,
-                'BalanceDue': total_due,
+                'Rent': int(t.rent),
+                'BalanceDue': int(total_due),
                 'Status': status,
-                'LastAlloc': t.ledger_payments[-1]['AllocationDesc'] if t.ledger_payments else ""
+                'LastAlloc': t.ledger_payments[-1]['AllocationDesc'] if t.ledger_payments else "",
+                'DEBUG_OK': t.delinquency_memo,
+                'DEBUG_MGMT': t.separate_mgmt
             })
             
+            # Print to terminal for developer
+            print(f"DEBUG: Prop {t.property_id} - Ok: {t.delinquency_memo[:10]}, Mgmt: {t.separate_mgmt}, Status: {status}")
+            
         return pd.DataFrame(results)
+class BankMapper:
+    @staticmethod
+    def suggest_mapping(df):
+        cols = df.columns.tolist()
+        mapping = {
+            'date': [],
+            'amount': None,
+            'sender': None,
+            'type': None
+        }
+        
+        # Date Logic (Can be multiple columns for Resona or single)
+        resona_date = ['取扱日付　年', '取扱日付　月', '取扱日付　日']
+        if all(c in cols for c in resona_date):
+            mapping['date'] = resona_date
+        else:
+            for c in cols:
+                if any(k in c for k in ['日付', '日', '年月日', 'Date']):
+                    mapping['date'] = [c]
+                    break
+        
+        # Amount Logic
+        for c in cols:
+            if any(k in c for k in ['金額', '入金', 'Amount']):
+                mapping['amount'] = c
+                break
+        
+        # Sender Logic
+        for c in cols:
+            if any(k in c for k in ['摘要', '振込人', 'お名前', 'Sender']):
+                mapping['sender'] = c
+                break
+        
+        # Type Logic (to filter "入金" if present)
+        for c in cols:
+            if any(k in c for k in ['取引名', '区分', 'Type']):
+                mapping['type'] = c
+                break
+                
+        return mapping

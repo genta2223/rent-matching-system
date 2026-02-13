@@ -86,18 +86,22 @@ class DBClient:
             raise Exception(f"Failed to update tenant {property_id}: {response.text}")
 
     def _clean_record(self, record):
-        """Helper to ensure JSON compatibility (handle NaN/Inf)."""
+        """Helper to ensure JSON compatibility (handle NaN/Inf) recursively."""
         import math
         import numpy as np
-        new_record = {}
-        for k, v in record.items():
-            if isinstance(v, (float, np.floating)):
-                if math.isnan(v) or math.isinf(v):
-                    new_record[k] = None
-                else:
-                    new_record[k] = float(v)
-            elif isinstance(v, (np.integer, np.int64)):
-                new_record[k] = int(v)
-            else:
-                new_record[k] = v
-        return new_record
+        
+        if isinstance(record, dict):
+            new_record = {}
+            for k, v in record.items():
+                new_record[k] = self._clean_record(v)
+            return new_record
+        elif isinstance(record, list):
+            return [self._clean_record(i) for i in record]
+        elif isinstance(record, (float, np.floating)):
+            if math.isnan(record) or math.isinf(record):
+                return None
+            return float(record)
+        elif isinstance(record, (np.integer, np.int64)):
+            return int(record)
+        else:
+            return record

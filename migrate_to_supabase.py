@@ -104,7 +104,8 @@ def migrate_tenants():
             "Values": {
                 "Agent": row.get('Agent'),
                 "Manager": row.get('Manager'),
-                "BankMatchName1": row.get('BankMatchName1')
+                "BankMatchName1": row.get('BankMatchName1'),
+                "SeparateAccountManagement": row.get('SeparateAccountManagement')
             }
         }
         records.append(clean_record(record))

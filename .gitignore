@@ -14,6 +14,10 @@ inspect_*.py
 verify_*.py
 check_*.py
 fix_*.py
+test_*.py
+dump_*.py
+list_*.py
+final_*.py
 debug_output.txt
 
 # IDE
