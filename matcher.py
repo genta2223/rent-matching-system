@@ -49,16 +49,21 @@ class TenantRecord:
         candidates_raw = [normalize_name(data.get(f'BankMatchName{i}')) for i in range(1, 4)]
         self.candidates = [c for c in candidates_raw if c]
         self.initial_date = parse_japanese_era(data.get('InitialPaymentDate'))
-        if pd.isna(self.initial_date):
-            # Try to use Today as fallback if no start date
-            self.initial_date = pd.Timestamp.now().replace(day=1)
+        if pd.isna(self.initial_date) or not self.initial_date:
+            # Fallback to a very old date if not specified
+            self.initial_date = pd.Timestamp(year=2000, month=1, day=1)
+            
         self.zip = str(data.get('Zip', ""))
         self.address = data.get('Address', "")
         
         # v4 new fields
         self.billing_zip = str(data.get('BillingAddressZip', ""))
         self.billing_address = data.get('BillingAddress', "")
-        self.separate_mgmt = str(data.get('SeparateAccountManagement', '')) == '1'
+        
+        # Robust check for '1' or '1.0'
+        raw_mgmt = str(data.get('SeparateAccountManagement', '0')).strip().lower()
+        self.separate_mgmt = (raw_mgmt.startswith('1') or raw_mgmt == '1.0')
+        
         self.memo = data.get('Memo', "")
         self.delinquency_memo = str(data.get('LatestPaymentMemo', ""))
         self.memo_anchor_date = None
@@ -68,14 +73,21 @@ class TenantRecord:
 
     def calculate_debts(self, target_date):
         """Initialize debts using memo as anchor and status source."""
-        self.memo_anchor_date = pd.Timestamp(year=2000, month=1, day=1) # default
+        # Use initial_date as the ultimate zero-point, but cap at 2 years back for safety
+        # unless specifically mentioned in memo.
+        limit_start = target_date.replace(day=1) - relativedelta(months=24)
+        calc_start = max(self.initial_date.replace(day=1), limit_start)
+        
+        self.memo_anchor_date = pd.Timestamp(year=2000, month=1, day=1)
         
         memo_clean = self.delinquency_memo.strip().lower()
         is_ok = memo_clean in ['ok', '', 'nan', 'none'] or not self.delinquency_memo
+        
         if is_ok:
             # Assume clean up to the end of the billing period
             self.memo_anchor_date = target_date.replace(day=1) + relativedelta(months=1)
-            start_calc = target_date.replace(day=1)
+            # Debts start from rent commencement (or capped limit)
+            curr = calc_start
         else:
             import re
             # Try to find a date like 2026/01/15 in the memo
@@ -84,17 +96,15 @@ class TenantRecord:
                 y, m, d = date_match.groups()
                 self.memo_anchor_date = pd.Timestamp(year=int(y), month=int(m), day=int(d))
             else:
-                # Fallback: Feb 1st if not ok but no date
                 self.memo_anchor_date = target_date.replace(day=1) - relativedelta(days=1)
             
-            start_calc = self.memo_anchor_date.replace(day=1)
+            curr = calc_start
             # Find earliest mentioned month to potentially start earlier
             mentions = re.findall(r"(\d{4})年(\d{1,2})月", self.delinquency_memo)
             if mentions:
                 timestamps = [pd.Timestamp(year=int(y), month=int(m), day=1) for y, m in mentions]
-                start_calc = min(start_calc, min(timestamps))
+                curr = min(curr, min(timestamps))
 
-        curr = start_calc
         end_month = target_date.replace(day=1) + relativedelta(months=1)
         
         initial_paid_map = {}
@@ -114,23 +124,26 @@ class TenantRecord:
                 if curr <= self.memo_anchor_date:
                     paid_init = self.rent
             else:
-                if curr < start_calc:
-                    paid_init = self.rent
-                else:
-                    paid_init = initial_paid_map.get(curr, 0.0)
+                paid_init = initial_paid_map.get(curr, 0.0)
             
             self.debts.append({'month': curr, 'amount': self.rent, 'paid': paid_init})
             curr += relativedelta(months=1)
 
     def allocate_payments(self):
-        """Apply ledger payments to debts using FIFO, ignoring ones before memo anchor."""
+        """Apply ledger payments to debts using FIFO, ignoring ones before memo anchor.
+        If InitialPaymentDate is available and recent, we use all known payments.
+        """
         self.ledger_payments.sort(key=lambda x: x['Date'])
+        
+        # If we have a definite start date, we don't filter ledger payments by memo anchor.
+        # This allows "reverse calculation" from rent start.
+        skip_filter = (self.initial_date > pd.Timestamp(year=2010, month=1, day=1))
         
         for p in self.ledger_payments:
             p['Allocations'] = []
             p['Surplus'] = 0.0
             
-            if p['Date'] <= self.memo_anchor_date:
+            if not skip_filter and p['Date'] <= self.memo_anchor_date:
                 # This payment is likely already reflected in the memo's "Paid" status.
                 continue
             

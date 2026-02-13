@@ -54,16 +54,16 @@ def create_invoice(tenant_data, output_path):
     c.setFont(font_name, 12)
     c.drawString(50, top_pos - 190, "【請求明細】")
     
-    y = top_pos - 210
+    y = top_pos - 215
     c.setFont(font_name, 10)
     # Header
     c.drawString(70, y, "該当年月")
     c.drawString(150, y, "家賃額")
     c.drawString(250, y, "既入金額")
     c.drawString(350, y, "差引不足額")
-    c.line(50, y-5, width-50, y-5)
+    c.line(50, y-10, width-50, y-10) # separator below header
     
-    y -= 25
+    y -= 35
     for h in tenant_data['History']:
         balance = int(h['amount'] - h['paid'])
         # Show only if not fully paid OR if it's the latest month in the history (next month)
@@ -79,33 +79,36 @@ def create_invoice(tenant_data, output_path):
             c.setFillColorRGB(0.8, 0, 0) # Red for overdue
         c.drawString(350, y, f"¥ {balance:,}")
         c.setFillColorRGB(0, 0, 0) # Back to black
-        y -= 20
-        c.line(50, y+5, width-50, y+5) # separator
+        
+        y -= 10
+        c.line(50, y, width-50, y) # separator
+        y -= 25 # more space for next row
         if y < 150: break
         
     # --- 6. Recent Payments Received (from Ledger) ---
-    y -= 30
-    if y < 100: 
+    y -= 20
+    if y < 120: 
         c.showPage()
         y = height - 50
         c.setFont(font_name, 10)
     
     c.setFont(font_name, 12)
     c.drawString(50, y, "【直近の入金履歴】")
-    y -= 20
+    y -= 25
     c.setFont(font_name, 10)
     c.drawString(70, y, "入金日")
     c.drawString(170, y, "金額")
     c.drawString(270, y, "摘要")
-    c.line(50, y-5, width-50, y-5)
+    c.line(50, y-10, width-50, y-10)
     
-    y -= 20
+    y -= 30
     for p in tenant_data.get('LedgerHistory', []):
         c.drawString(70, y, p['Date'].strftime("%Y/%m/%d"))
         c.drawString(170, y, f"¥ {int(p['Amount']):,}")
         # Allocation details
         c.drawString(270, y, p.get('AllocationDesc', ''))
-        y -= 15
+        
+        y -= 25
         if y < 50: break
 
     # --- 7. Footer / Instructions ---
