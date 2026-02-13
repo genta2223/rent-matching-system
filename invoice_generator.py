@@ -22,33 +22,35 @@ def create_invoice(tenant_data, output_path):
     width, height = A4
     font_name = setup_fonts()
     
-    # --- 1. Date of Issue (Top-Right) ---
+    # --- 1. Date of Issue & Property ID (Top-Right) ---
     c.setFont(font_name, 10)
     issue_date = datetime.now().strftime("%Y年%m月%d日")
-    c.drawRightString(width - 50, height - 50, f"発行日: {issue_date}")
+    c.drawRightString(width - 50, height - 40, f"発行日: {issue_date}")
+    c.drawRightString(width - 50, height - 55, f"物件管理番号: {tenant_data.get('PropertyID', '')}")
     
     # --- 2. Window Envelope Address (Top-Left) ---
-    # Most window envelopes have the window starting 12-15mm from top.
-    left_margin = 80
-    top_pos = height - 80
+    left_margin = 40
+    top_pos = height - 60
     
     c.setFont(font_name, 11)
-    c.drawString(left_margin, top_pos, f"〒 {tenant_data['Zip']}")
-    c.drawString(left_margin, top_pos - 15, tenant_data['Address'])
+    zip_code = str(tenant_data.get('Zip', '')).strip()
+    c.drawString(left_margin, top_pos, f"〒 {zip_code}")
+    address_str = str(tenant_data.get('Address', '')).strip()
+    c.drawString(left_margin, top_pos - 15, address_str)
     c.setFont(font_name, 16)
-    c.drawString(left_margin, top_pos - 40, f"{tenant_data['Name']} 様")
+    name_str = str(tenant_data.get('Name', '')).strip()
+    c.drawString(left_margin, top_pos - 40, f"{name_str} 様")
 
     # --- 3. Title (Below Address) ---
     c.setFont(font_name, 18)
     c.drawCentredString(width / 2, top_pos - 100, "お支払い期日のお知らせ（請求書）")
     
     # --- 4. Main Statement ---
-    c.setFont(font_name, 12)
-    c.drawString(50, top_pos - 140, f"物件管理番号: {tenant_data['PropertyID']}")
     c.setFont(font_name, 14)
+    # Property ID moved to top-right
     c.drawString(50, top_pos - 130, f"ご請求合計金額:   ¥ {int(tenant_data['TotalDue']):,} -")
     c.setFont(font_name, 10)
-    c.drawString(50, top_pos - 150, "(未払残高 + 翌月分家賃の合計です)")
+    c.drawString(50, top_pos - 155, "(未払残高 + 翌月分家賃の合計です)") 
     
     # --- 5. Billing Details (請求明細) ---
     c.setFont(font_name, 12)
@@ -66,7 +68,7 @@ def create_invoice(tenant_data, output_path):
     y -= 35
     for h in tenant_data['History']:
         balance = int(h['amount'] - h['paid'])
-        # Show only if not fully paid OR if it's the latest month in the history (next month)
+        # Show if not fully paid OR if it's the latest month (next month)
         is_next_month = (h == tenant_data['History'][-1])
         if balance <= 0 and not is_next_month:
             continue
@@ -82,15 +84,17 @@ def create_invoice(tenant_data, output_path):
         
         y -= 10
         c.line(50, y, width-50, y) # separator
-        y -= 25 # more space for next row
-        if y < 150: break
+        y -= 25 
+        if y < 200: # Earlier break to avoid overlap with footer
+            c.showPage()
+            y = height - 50
+            c.setFont(font_name, 10)
         
     # --- 6. Recent Payments Received (from Ledger) ---
     y -= 20
-    if y < 120: 
+    if y < 180: 
         c.showPage()
         y = height - 50
-        c.setFont(font_name, 10)
     
     c.setFont(font_name, 12)
     c.drawString(50, y, "【直近の入金履歴】")
@@ -98,24 +102,45 @@ def create_invoice(tenant_data, output_path):
     c.setFont(font_name, 10)
     c.drawString(70, y, "入金日")
     c.drawString(170, y, "金額")
-    c.drawString(270, y, "摘要")
+    c.drawString(270, y, "摘要／充当内容")
     c.line(50, y-10, width-50, y-10)
     
     y -= 30
     for p in tenant_data.get('LedgerHistory', []):
-        c.drawString(70, y, p['Date'].strftime("%Y/%m/%d"))
-        c.drawString(170, y, f"¥ {int(p['Amount']):,}")
-        # Allocation details
-        c.drawString(270, y, p.get('AllocationDesc', ''))
+        row_y = y
+        c.drawString(70, row_y, p['Date'].strftime("%Y/%m/%d"))
+        c.drawString(170, row_y, f"¥ {int(p['Amount']):,}")
         
-        y -= 25
-        if y < 50: break
+        # Wrapped Multi-line Allocation Description
+        desc = p.get('AllocationDesc', '')
+        from reportlab.lib.utils import simpleSplit
+        lines = simpleSplit(desc, font_name, 10, width - 320) # 270px width
+        
+        line_y = row_y
+        for line in lines:
+            c.drawString(270, line_y, line)
+            line_y -= 12
+        
+        # Update y for next row based on number of lines
+        y = min(y - 25, line_y - 13)
+        
+        if y < 150: # Leave space for footer
+            c.drawString(50, y, "...(履歴が多い場合は省略されます)")
+            break
 
-    # --- 7. Footer / Instructions ---
+    # --- 7. Footer / Bank Info ---
+    footer_y = 120
+    c.setDash(1, 2)
+    c.line(50, footer_y + 15, width-50, footer_y + 15)
+    c.setDash()
     c.setFont(font_name, 10)
-    footer_y = 100
-    c.drawString(50, footer_y, "※ 本状と行き違いでお支払い済みの場合は、何卒ご容赦ください。")
-    c.drawString(50, footer_y - 15, "※ お振込みは原則として月末までにお願い申し上げます。")
+    c.drawString(50, footer_y, "【お振込先】")
+    c.setFont(font_name, 11)
+    c.drawString(70, footer_y - 20, "りそな銀行 住道（ｽﾐﾉﾄﾞｳ）支店 普通 3041570 サカグチ ゲンタ")
+    
+    c.setFont(font_name, 9)
+    c.drawString(50, footer_y - 45, "※ 本状と行き違いでお支払い済みの場合は、何卒ご容赦ください。")
+    c.drawString(50, footer_y - 60, "※ お振込み手数料はお客様のご負担にてお願い申し上げます。")
     
     c.showPage()
     c.save()
