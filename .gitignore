@@ -1,0 +1,12 @@
+# Sensitive data
+private_data/
+*.csv
+reconciliation_report.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
