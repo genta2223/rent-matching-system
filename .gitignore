@@ -2,10 +2,19 @@
 private_data/
 *.csv
 reconciliation_report.csv
+.env
 
 # Python
 __pycache__/
 *.pyc
+
+# Debug & Temp scripts
+debug_*.py
+inspect_*.py
+verify_*.py
+check_*.py
+fix_*.py
+debug_output.txt
 
 # IDE
 .vscode/
