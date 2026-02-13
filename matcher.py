@@ -81,12 +81,45 @@ class TenantRecord:
         self.memo_anchor_date = None
         self.memo_paid_map = {} # month -> paid_amount
         
+        # New Data-Driven Columns
+        try:
+            self.base_debt_amount = float(data.get('BaseDebtAmount', 0))
+        except:
+            self.base_debt_amount = 0.0
+        self.base_debt_date = pd.to_datetime(data.get('BaseDebtDate'))
+        if pd.isna(self.base_debt_date):
+            self.base_debt_date = None
+        
         self.ledger_payments = []
         self.debts = [] 
 
     def calculate_debts(self, target_date):
-        """Initialize debts using memo as anchor and status source."""
+        """Initialize debts using BaseDebt columns if available, otherwise fallback to memo."""
         target_normalized = normalize_month(target_date)
+        
+        # --- PHASE 1: Try Data-Driven Calculation (v14) ---
+        if self.base_debt_date:
+            self.memo_anchor_date = self.base_debt_date
+            # Snapshot balance as of the anchor date
+            if self.base_debt_amount > 0:
+                # Add historical residue as the first debt
+                # Use a dummy month key that represents "Previous Balance"
+                self.debts.append({
+                    'month': self.base_debt_date, 
+                    'amount': self.base_debt_amount, 
+                    'paid': 0.0,
+                    'is_carry_over': True
+                })
+            
+            # Start accruing monthly rent from the month FOLLOWING the anchor date
+            curr = normalize_month(self.base_debt_date + relativedelta(months=1))
+            limit_end = target_normalized + relativedelta(months=1)
+            while curr <= limit_end:
+                self.debts.append({'month': curr, 'amount': self.rent, 'paid': 0.0, 'is_carry_over': False})
+                curr += relativedelta(months=1)
+            return
+
+        # --- PHASE 2: Fallback to Memo-Based Parsing (Old Logic) ---
         limit_start = target_normalized - relativedelta(months=8)
         calc_start = max(normalize_month(self.initial_date), limit_start)
         
@@ -103,32 +136,34 @@ class TenantRecord:
                 m = int(m_str)
                 if y_str:
                     return pd.Timestamp(year=int(y_str), month=m, day=1)
-                
-                # Intelligent year inference:
-                # If target is Feb 2026 and memo says "12月", it's likely Dec 2025.
-                # Rule: If month in memo > current month + 2, assume it's previous year.
                 y = target_date.year
                 if m > target_date.month + 2:
                     y -= 1
                 return pd.Timestamp(year=y, month=m, day=1)
 
-            # 1. Full paid matches: newest first logic (don't overwrite)
-            full_paid_matches = re.findall(r"(?:(\d{4})年)?(\d{1,2})月分(全額|全額充当)", self.delinquency_memo)
+            # Isolate the latest session by splitting by text that looks like a date
+            # sections[0] is often the most recent session
+            sections = re.split(r"(\d{4}[/-]\d{1,2}[/-]\d{1,2})", self.delinquency_memo)
+            parse_text = self.delinquency_memo
+            if len(sections) >= 3:
+                # Use the first date-delimited block
+                parse_text = sections[0] + sections[1] + sections[2]
+
+            full_paid_matches = re.findall(r"(?:(\d{4})年)?(\d{1,2})月分(全額|全額充当)", parse_text)
             for y_str, m_str, _ in full_paid_matches:
                 t = parse_year_month(y_str, m_str)
                 if t not in self.memo_paid_map:
                     self.memo_paid_map[t] = self.rent
                 if t < first_mention: first_mention = t
             
-            # 2. Partial paid matches
-            partial_paid_matches = re.findall(r"(?:(\d{4})年)?(\d{1,2})月分のうち(\d+)円", self.delinquency_memo)
+            partial_paid_matches = re.findall(r"(?:(\d{4})年)?(\d{1,2})月分のうち(\d+)円", parse_text)
             for y_str, m_str, amt in partial_paid_matches:
                 t = parse_year_month(y_str, m_str)
                 if t not in self.memo_paid_map:
                     self.memo_paid_map[t] = float(amt)
                 if t < first_mention: first_mention = t
 
-            date_match = re.search(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", self.delinquency_memo)
+            date_match = re.search(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", parse_text)
             if date_match:
                 y, m, d = date_match.groups()
                 self.memo_anchor_date = pd.Timestamp(year=int(y), month=int(m), day=int(d))
@@ -145,23 +180,23 @@ class TenantRecord:
                 if curr <= self.memo_anchor_date:
                     paid_init = self.rent
             else:
-                # 1. Base logic: months before checkpoint are full paid
                 if curr < checkpoint:
                     paid_init = self.rent
-                
-                # 2. SPECIFIC OVERRIDE from memo for this month or nearby
                 if curr in self.memo_paid_map:
                     paid_init = self.memo_paid_map[curr]
             
-            self.debts.append({'month': curr, 'amount': self.rent, 'paid': paid_init})
+            self.debts.append({'month': curr, 'amount': self.rent, 'paid': paid_init, 'is_carry_over': False})
             curr += relativedelta(months=1)
 
     def allocate_payments(self):
-        """Apply ledger payments to debts using FIFO, with Anchor Baseline."""
+        """Apply ledger payments to debts using FIFO, with BaseDebt cutoff or Anchor Baseline."""
         self.ledger_payments.sort(key=lambda x: x['Date'])
         
+        # 1. Identify cutoff date (prioritize BaseDebtDate)
+        cutoff_date = self.base_debt_date.date() if self.base_debt_date else None
+        
         anchor_payment = None
-        if self.memo_anchor_date:
+        if not cutoff_date and self.memo_anchor_date:
             for p in self.ledger_payments:
                 if p['Date'].date() == self.memo_anchor_date.date():
                     anchor_payment = p
@@ -172,23 +207,22 @@ class TenantRecord:
             p['Surplus'] = 0.0
             p['AllocationDesc'] = ""
             
-            # 1. Skip all payments up to anchor date (already handled by calculate_debts baseline)
-            if self.memo_anchor_date and p['Date'].date() < self.memo_anchor_date.date():
+            # 2. Skip all payments up to cutoff (inclusive) or memo anchor (exclusive)
+            if cutoff_date and p['Date'].date() <= cutoff_date:
+                p['AllocationDesc'] = "記録済み"
+                continue
+            if not cutoff_date and self.memo_anchor_date and p['Date'].date() < self.memo_anchor_date.date():
                 p['AllocationDesc'] = "記録済み"
                 continue
 
-            # 2. Case: The Anchor Payment itself
+            # 3. Case: The Anchor Payment (Memo-based logic fallback)
             if p == anchor_payment:
                 alloc_parts = []
-                # Use memo status to describe what was applied, but don't double-add to d['paid']
-                # since calculate_debts ALREADY set d['paid'] to these values.
                 for month, amt in sorted(self.memo_paid_map.items()):
                     if amt > 0:
                         type_str = "全額" if amt >= self.rent else "一部"
                         alloc_parts.append(f"{month.strftime('%Y年%m月分')}{type_str}({int(amt):,}円)")
                 
-                # We need to correctly set p['Allocations'] for the PDF history logic
-                # but we DON'T update d['paid'] here.
                 for month, amt in self.memo_paid_map.items():
                     p['Allocations'].append({
                         'Month': month,
@@ -199,7 +233,7 @@ class TenantRecord:
                 p['AllocationDesc'] = " / ".join(alloc_parts) if alloc_parts else "充当内容なし"
                 continue
 
-            # 3. Case: Standard FIFO for payments AFTER the anchor
+            # 4. Case: Standard FIFO for payments AFTER the cutoff/anchor
             amount_to_alloc = p['Amount']
             alloc_parts = []
             for d in self.debts:
@@ -207,16 +241,25 @@ class TenantRecord:
                     needed = d['amount'] - d['paid']
                     alloc = min(needed, amount_to_alloc)
                     if alloc > 0:
-                        d['paid'] += alloc
-                        amount_to_alloc -= alloc
+                        d['paid'] += float(alloc)
+                        amount_to_alloc -= float(alloc)
                         is_full = d['paid'] >= d['amount']
                         p['Allocations'].append({
                             'Month': d['month'],
                             'Amount': alloc,
                             'IsFull': is_full
                         })
+                        
+                        # Fix formatting for carry-over or regular month
+                        if d.get('is_carry_over'):
+                            desc_month = "前月以前残高"
+                        else:
+                            # Ensure d['month'] is Timestamp before strftime
+                            ts = pd.Timestamp(d['month'])
+                            desc_month = ts.strftime('%Y年%m月分')
+                            
                         type_str = "全額" if is_full else "一部"
-                        alloc_parts.append(f"{d['month'].strftime('%Y年%m月分')}{type_str}({int(alloc):,}円)")
+                        alloc_parts.append(f"{desc_month}{type_str}({int(alloc):,}円)")
                 if amount_to_alloc <= 0:
                     break
             p['Surplus'] = amount_to_alloc
