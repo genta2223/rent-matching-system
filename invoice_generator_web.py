@@ -7,13 +7,23 @@ from datetime import datetime
 from io import BytesIO
 
 def setup_fonts():
-    # Try common Windows font first
+    # 1. Try local project font (Best for Streamlit Cloud)
+    # Using Sawarabi Gothic (Safe TTF)
+    project_font = os.path.join(os.path.dirname(__file__), "fonts", "SawarabiGothic-Regular.ttf")
+    if os.path.exists(project_font):
+        try:
+            pdfmetrics.registerFont(TTFont('SawarabiGothic', project_font))
+            return 'SawarabiGothic'
+        except Exception as e:
+            print(f"Failed to load project font: {e}")
+
+    # 2. Common Windows Japanese font path (Fallback for local dev)
     font_path = "C:/Windows/Fonts/msgothic.ttc"
     if os.path.exists(font_path):
         try:
             pdfmetrics.registerFont(TTFont('Gothic', font_path))
             return 'Gothic'
-        except:
+        except Exception:
             pass
     return 'Helvetica' # Fallback
 
