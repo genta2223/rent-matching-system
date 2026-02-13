@@ -31,14 +31,21 @@ HEADERS = {
     "Prefer": "return=representation"
 }
 
+
 class DBClient:
     def __init__(self):
         self.base_url = SUPABASE_URL
         self.headers = HEADERS
 
-    def fetch_tenants(self):
-        """Fetch all tenants as a DataFrame."""
+    # ------------------------------------------------------------------
+    # Tenants
+    # ------------------------------------------------------------------
+
+    def fetch_tenants(self, user_id=None):
+        """Fetch tenants as a DataFrame. Optionally filter by user_id."""
         url = f"{self.base_url}/rest/v1/tenants?select=*"
+        if user_id:
+            url += f"&user_id=eq.{user_id}"
         response = requests.get(url, headers=self.headers)
         if response.status_code == 200:
             data = response.json()
@@ -46,9 +53,46 @@ class DBClient:
         else:
             raise Exception(f"Failed to fetch tenants: {response.text}")
 
-    def fetch_payments(self):
-        """Fetch all payments as a DataFrame."""
+    def upsert_tenants(self, records, user_id=None):
+        """Bulk upsert tenants. Optionally stamp user_id on each record."""
+        url = f"{self.base_url}/rest/v1/tenants"
+        headers = self.headers.copy()
+        headers["Prefer"] = "resolution=merge-duplicates"
+
+        cleaned_records = []
+        for r in records:
+            rec = self._clean_record(r)
+            if user_id:
+                rec["user_id"] = user_id
+            cleaned_records.append(rec)
+
+        response = requests.post(url, headers=headers, json=cleaned_records)
+        if response.status_code in (200, 201):
+            return response.json() if response.content else []
+        else:
+            raise Exception(f"Failed to upsert tenants: {response.text}")
+
+    def update_tenant(self, property_id, data, user_id=None):
+        """Update a single tenant by PropertyID."""
+        url = f"{self.base_url}/rest/v1/tenants?PropertyID=eq.{property_id}"
+        if user_id:
+            url += f"&user_id=eq.{user_id}"
+        cleaned_data = self._clean_record(data)
+        response = requests.patch(url, headers=self.headers, json=cleaned_data)
+        if response.status_code in (200, 204):
+            return True
+        else:
+            raise Exception(f"Failed to update tenant {property_id}: {response.text}")
+
+    # ------------------------------------------------------------------
+    # Payments
+    # ------------------------------------------------------------------
+
+    def fetch_payments(self, user_id=None):
+        """Fetch payments as a DataFrame. Optionally filter by user_id."""
         url = f"{self.base_url}/rest/v1/payments?select=*"
+        if user_id:
+            url += f"&user_id=eq.{user_id}"
         response = requests.get(url, headers=self.headers)
         if response.status_code == 200:
             data = response.json()
@@ -56,52 +100,98 @@ class DBClient:
         else:
             raise Exception(f"Failed to fetch payments: {response.text}")
 
-    def upsert_payments(self, records):
-        """Bulk upsert payments."""
+    def upsert_payments(self, records, user_id=None):
+        """Bulk upsert payments. Optionally stamp user_id on each record."""
         url = f"{self.base_url}/rest/v1/payments"
-        # Prefer: resolution=merge-duplicates is needed for upsert behavior if not default
         headers = self.headers.copy()
         headers["Prefer"] = "resolution=merge-duplicates"
-        
-        # Clean records (NaN handling)
-        cleaned_records = [self._clean_record(r) for r in records]
-        
+
+        cleaned_records = []
+        for r in records:
+            rec = self._clean_record(r)
+            if user_id:
+                rec["user_id"] = user_id
+            cleaned_records.append(rec)
+
         response = requests.post(url, headers=headers, json=cleaned_records)
         if response.status_code in (200, 201):
             return response.json() if response.content else []
         else:
             raise Exception(f"Failed to upsert payments: {response.text}")
 
-    def upsert_tenants(self, records):
-        """Bulk upsert tenants."""
-        url = f"{self.base_url}/rest/v1/tenants"
+    # ------------------------------------------------------------------
+    # CSV Templates (Supabase-backed, replaces .csv_templates.json)
+    # ------------------------------------------------------------------
+
+    def fetch_csv_templates(self, user_id=None):
+        """Fetch CSV templates. Returns user-specific + shared templates."""
+        url = f"{self.base_url}/rest/v1/csv_templates?select=*"
+        if user_id:
+            # user's own templates OR shared ones
+            url += f"&or=(user_id.eq.{user_id},shared.eq.true)"
+        response = requests.get(url, headers=self.headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception(f"Failed to fetch csv_templates: {response.text}")
+
+    def lookup_csv_template(self, header_hash, user_id=None):
+        """Look up a template by header_hash. Prefers user-specific over shared."""
+        url = f"{self.base_url}/rest/v1/csv_templates?header_hash=eq.{header_hash}"
+        if user_id:
+            url += f"&or=(user_id.eq.{user_id},shared.eq.true)"
+        url += "&order=user_id.desc.nullslast&limit=1"
+        response = requests.get(url, headers=self.headers)
+        if response.status_code == 200:
+            data = response.json()
+            return data[0] if data else None
+        else:
+            raise Exception(f"Failed to lookup csv_template: {response.text}")
+
+    def upsert_csv_template(self, header_hash, mapping, columns=None,
+                            label='', user_id=None, shared=False):
+        """Save or update a CSV template."""
+        url = f"{self.base_url}/rest/v1/csv_templates"
         headers = self.headers.copy()
         headers["Prefer"] = "resolution=merge-duplicates"
-        
-        cleaned_records = [self._clean_record(r) for r in records]
-        
-        response = requests.post(url, headers=headers, json=cleaned_records)
+
+        import json
+        record = {
+            "header_hash": header_hash,
+            "user_id": user_id,  # None = global shared
+            "label": label,
+            "mapping": json.dumps(mapping, ensure_ascii=False) if isinstance(mapping, dict) else mapping,
+            "columns": json.dumps(columns, ensure_ascii=False) if isinstance(columns, list) else columns,
+            "shared": shared,
+        }
+        response = requests.post(url, headers=headers, json=[record])
         if response.status_code in (200, 201):
             return response.json() if response.content else []
         else:
-            raise Exception(f"Failed to upsert tenants: {response.text}")
+            raise Exception(f"Failed to upsert csv_template: {response.text}")
 
-    def update_tenant(self, property_id, data):
-        """Update a single tenant."""
-        url = f"{self.base_url}/rest/v1/tenants?PropertyID=eq.{property_id}"
-        cleaned_data = self._clean_record(data)
-        
-        response = requests.patch(url, headers=self.headers, json=cleaned_data)
+    def delete_csv_template(self, header_hash, user_id=None):
+        """Delete a CSV template by header_hash and user_id."""
+        url = f"{self.base_url}/rest/v1/csv_templates?header_hash=eq.{header_hash}"
+        if user_id:
+            url += f"&user_id=eq.{user_id}"
+        else:
+            url += "&user_id=is.null"
+        response = requests.delete(url, headers=self.headers)
         if response.status_code in (200, 204):
             return True
         else:
-            raise Exception(f"Failed to update tenant {property_id}: {response.text}")
+            raise Exception(f"Failed to delete csv_template: {response.text}")
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
 
     def _clean_record(self, record):
         """Helper to ensure JSON compatibility (handle NaN/Inf) recursively."""
         import math
         import numpy as np
-        
+
         if isinstance(record, dict):
             new_record = {}
             for k, v in record.items():

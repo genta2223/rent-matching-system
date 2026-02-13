@@ -134,7 +134,7 @@ with tab3:
             
             cols = bank_df.columns.tolist()
             header_hash = TemplateManager.get_header_hash(cols)
-            saved_template = TemplateManager.lookup(cols)
+            saved_template = TemplateManager.lookup(db, cols)
             
             if saved_template:
                 # Known template — skip confirmation
@@ -199,7 +199,7 @@ with tab3:
                 template_label = st.text_input("テンプレート名（例: りそな銀行）", value="")
                 
                 if st.button("✅ このマッピングで確定・保存"):
-                    TemplateManager.save_template(cols, mapping, label=template_label)
+                    TemplateManager.save_template(db, cols, mapping, label=template_label)
                     st.success(f"テンプレート「{template_label}」を保存しました！次回から自動適用されます。")
                     needs_confirmation = False
                     st.rerun()
@@ -246,7 +246,7 @@ with tab3:
                     
                 # Option to reset template
                 if st.button("🗑 テンプレートをリセット"):
-                    TemplateManager.delete_template(cols)
+                    TemplateManager.delete_template(db, cols)
                     st.info("テンプレートを削除しました。次回アップロード時に再確認されます。")
                     st.rerun()
 
@@ -429,8 +429,8 @@ with tab3:
                             st.write("tenant_id:", inv.get('PropertyID'))
                             st.write("RawPaymentsCount:", inv.get('RawPaymentsCount', 0))
                             # Search by clean id
-                            p14_raw = payments_df[payments_df['PropertyID'].astype(str).str.split('.').str[0] == str(inv.get('PropertyID'))]
-                            st.write("マッチした生データ:", p14_raw)
+                            debug_raw = payments_df[payments_df['PropertyID'].astype(str).str.split('.').str[0] == str(inv.get('PropertyID'))]
+                            st.write("マッチした生データ:", debug_raw)
                         
                     st.write("#### 請求内訳 (History)")
                     hist_df = pd.DataFrame(inv['History'])

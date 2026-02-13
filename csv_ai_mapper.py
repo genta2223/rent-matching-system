@@ -2,15 +2,13 @@
 csv_ai_mapper.py — Heuristic-based bank CSV auto-detection + template management.
 
 No LLM required. Uses pattern matching on header names and data types.
-Templates are stored as JSON keyed by header hash for instant re-use.
+Templates are stored in Supabase (csv_templates table) for persistence.
 """
 
 import hashlib
 import json
-import os
 import re
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 
@@ -56,7 +54,7 @@ class HeuristicMapper:
         """
         cols = df.columns.tolist()
         cols_lower = [str(c).lower().strip() for c in cols]
-        mapping = {
+        mapping: dict = {
             'date': None,
             'date_parts': None,
             'amount': None,
@@ -176,61 +174,80 @@ class HeuristicMapper:
 
 
 # ---------------------------------------------------------------------------
-# TemplateManager: hash-based template storage
+# TemplateManager: Supabase-backed template storage
 # ---------------------------------------------------------------------------
 
-TEMPLATE_FILE = os.path.join(os.path.dirname(__file__), '.csv_templates.json')
-
-
 class TemplateManager:
-    """Persist column mappings keyed by CSV header hash."""
+    """Persist column mappings in Supabase csv_templates table.
+
+    Supports:
+      - User-specific templates (user_id set)
+      - Shared/global templates (user_id=None, shared=True)
+    """
 
     @staticmethod
     def get_header_hash(columns: list) -> str:
-        """SHA256 hash of sorted column names."""
+        """SHA256 hash of column names."""
         key = '|'.join(str(c).strip() for c in columns)
         return hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]
 
     @staticmethod
-    def _load() -> dict:
-        if os.path.exists(TEMPLATE_FILE):
-            with open(TEMPLATE_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
+    def lookup(db_client, columns: list, user_id=None):
+        """Return saved mapping for this header layout, or None.
+
+        Args:
+            db_client: DBClient instance
+            columns: list of column names from the CSV
+            user_id: optional user ID for multi-tenant filtering
+        """
+        header_hash = TemplateManager.get_header_hash(columns)
+        try:
+            result = db_client.lookup_csv_template(header_hash, user_id=user_id)
+            if result:
+                # Parse mapping from JSON if needed
+                mapping = result.get('mapping')
+                if isinstance(mapping, str):
+                    mapping = json.loads(mapping)
+                return {
+                    'mapping': mapping,
+                    'label': result.get('label', ''),
+                    'columns': result.get('columns'),
+                    'shared': result.get('shared', False),
+                }
+            return None
+        except Exception:
+            return None
 
     @staticmethod
-    def _save(data: dict):
-        with open(TEMPLATE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+    def save_template(db_client, columns: list, mapping: dict,
+                      label: str = '', user_id=None, shared: bool = False):
+        """Save a confirmed mapping for future reuse.
 
-    @classmethod
-    def lookup(cls, columns: list) -> dict | None:
-        """Return saved mapping for this header layout, or None."""
-        h = cls.get_header_hash(columns)
-        store = cls._load()
-        return store.get(h)
+        Args:
+            db_client: DBClient instance
+            columns: list of column names
+            mapping: detected/confirmed column mapping dict
+            label: human-readable label (e.g. 'りそな銀行')
+            user_id: owner user ID (None = global)
+            shared: if True, template is visible to all users
+        """
+        header_hash = TemplateManager.get_header_hash(columns)
+        # Remove confidence from stored mapping (it's computed dynamically)
+        store_mapping = {k: v for k, v in mapping.items() if k != 'confidence'}
+        db_client.upsert_csv_template(
+            header_hash=header_hash,
+            mapping=store_mapping,
+            columns=[str(c) for c in columns],
+            label=label,
+            user_id=user_id,
+            shared=shared,
+        )
 
-    @classmethod
-    def save_template(cls, columns: list, mapping: dict, label: str = ''):
-        """Save a confirmed mapping for future reuse."""
-        h = cls.get_header_hash(columns)
-        store = cls._load()
-        entry = {
-            'mapping': mapping,
-            'label': label,
-            'columns': [str(c) for c in columns],
-            'saved_at': datetime.now().isoformat(),
-        }
-        store[h] = entry
-        cls._save(store)
-
-    @classmethod
-    def delete_template(cls, columns: list):
-        h = cls.get_header_hash(columns)
-        store = cls._load()
-        if h in store:
-            del store[h]
-            cls._save(store)
+    @staticmethod
+    def delete_template(db_client, columns: list, user_id=None):
+        """Delete a template by header hash."""
+        header_hash = TemplateManager.get_header_hash(columns)
+        db_client.delete_csv_template(header_hash, user_id=user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +270,7 @@ def _find_col(cols, cols_lower, keywords, exclude=None, exact=False):
     return None
 
 
-def _detect_date_column(df: pd.DataFrame) -> str | None:
+def _detect_date_column(df: pd.DataFrame):
     """Find column with date-like string values (e.g. 2025/01/15)."""
     date_pattern = re.compile(r'\d{4}[/\-]\d{1,2}[/\-]\d{1,2}')
     for col in df.columns:
@@ -264,7 +281,7 @@ def _detect_date_column(df: pd.DataFrame) -> str | None:
     return None
 
 
-def _detect_numeric_column(df: pd.DataFrame, exclude_keywords=None) -> str | None:
+def _detect_numeric_column(df: pd.DataFrame, exclude_keywords=None):
     """Find the first numeric-looking column not in exclude list."""
     exclude_keywords = [e.lower() for e in (exclude_keywords or [])]
     for col in df.columns:
