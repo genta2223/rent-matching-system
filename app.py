@@ -108,15 +108,15 @@ with tab2:
 with tab3:
     st.subheader("一括管理・データ更新")
     
-    # Section 1: Bank Data Mapping
-    st.markdown("### 1. 銀行データ取込 (一括自動判定)")
+    # Section 1: Bank Data Import with AI-like auto detection
+    st.markdown("### 1. 銀行データ取込 (自動判定)")
     st.write("銀行からダウンロードしたCSVをそのままアップロードしてください。")
     uploaded_file = st.file_uploader("銀行CSVファイルをアップロード", type=["csv"])
     
     if uploaded_file is not None:
         try:
+            # --- Step 1: Read CSV with encoding detection ---
             try:
-                # Try relative paths/different encodings
                 import chardet
                 raw_data = uploaded_file.read()
                 result = chardet.detect(raw_data)
@@ -127,41 +127,132 @@ with tab3:
                 uploaded_file.seek(0)
                 bank_df = pd.read_csv(uploaded_file, encoding='cp932')
             
-            st.write(f"読み込み: {len(bank_df)} 行")
+            st.write(f"📊 読み込み: **{len(bank_df)} 行** × {len(bank_df.columns)} 列")
             
-            from matcher_db import BankMapper
-            mapping = BankMapper.suggest_mapping(bank_df)
+            # --- Step 2: Template lookup or heuristic detection ---
+            from csv_ai_mapper import HeuristicMapper, TemplateManager
             
-            st.info(f"AI判定結果: 日付:{mapping['date']}, 金額:{mapping['amount']}, 振込人:{mapping['sender']}")
-            
-            # Allow manual override if needed
             cols = bank_df.columns.tolist()
-            with st.expander("列マッピングを手動で微調整する"):
-                mapping['sender'] = st.selectbox("振込人名の列", cols, index=cols.index(mapping['sender']) if mapping['sender'] in cols else 0)
-                mapping['amount'] = st.selectbox("金額の列", cols, index=cols.index(mapping['amount']) if mapping['amount'] in cols else 0)
-                # date is handled simply here
+            header_hash = TemplateManager.get_header_hash(cols)
+            saved_template = TemplateManager.lookup(cols)
             
-            tenants_df = db.fetch_tenants()
-            payments_df = db.fetch_payments()
-            engine = LogicEngine(tenants_df, payments_df)
-            
-            new_entries = engine.match_new_bank_data(bank_df, mapping=mapping)
-            
-            if new_entries:
-                st.info(f"新規マッチング: {len(new_entries)} 件")
-                st.dataframe(pd.DataFrame(new_entries))
-                
-                if st.button("銀行入金データを登録"):
-                    try:
-                        db.upsert_payments(new_entries)
-                        st.success("登録完了しました！")
-                        st.cache_data.clear()
-                    except Exception as e:
-                        st.error(f"登録エラー: {e}")
+            if saved_template:
+                # Known template — skip confirmation
+                mapping = saved_template['mapping']
+                label = saved_template.get('label', '不明')
+                st.success(f"✅ 登録済みテンプレート「{label}」を適用します (ハッシュ: {header_hash[:8]})")
+                needs_confirmation = False
             else:
-                st.warning("新規の入金データは見つかりませんでした。")
+                # New layout — run heuristic detection
+                mapping = HeuristicMapper.suggest_mapping(bank_df)
+                st.warning(f"🔍 **新しいCSVレイアウトを検知しました** (ハッシュ: {header_hash[:8]})")
+                needs_confirmation = True
+            
+            # --- Step 3: Show mapping preview & allow manual override ---
+            if needs_confirmation:
+                st.markdown("#### 推定結果の確認")
+                
+                conf_pct = int(mapping.get('confidence', 0) * 100)
+                st.info(f"推定精度: **{conf_pct}%**")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Date display
+                    if mapping.get('date_parts'):
+                        parts = mapping['date_parts']
+                        st.write(f"📅 日付: `{parts['year']}` / `{parts['month']}` / `{parts['day']}` (年/月/日)")
+                    elif mapping.get('date'):
+                        st.write(f"📅 日付: `{mapping['date']}`")
+                    else:
+                        st.error("⚠️ 日付列が見つかりません")
+                    
+                    st.write(f"💰 金額: `{mapping.get('amount', '未検出')}`")
+                    st.write(f"👤 振込人: `{mapping.get('sender', '未検出')}`")
+                    if mapping.get('deposit_filter'):
+                        st.write(f"🏷 入出金フィルター: `{mapping['deposit_filter']}`")
+                
+                with col2:
+                    st.write("**CSVプレビュー (先頭3行)**")
+                    st.dataframe(bank_df.head(3), use_container_width=True)
+                
+                # Manual override
+                with st.expander("🔧 手動で修正する場合はこちら"):
+                    date_mode = st.radio("日付形式", ["年/月/日 個別列", "単一列"], 
+                                         index=0 if mapping.get('date_parts') else 1)
+                    
+                    if date_mode == "年/月/日 個別列":
+                        dp = mapping.get('date_parts') or {}
+                        y_col = st.selectbox("年の列", cols, index=cols.index(dp.get('year', cols[0])) if dp.get('year') in cols else 0)
+                        m_col = st.selectbox("月の列", cols, index=cols.index(dp.get('month', cols[0])) if dp.get('month') in cols else 0)
+                        d_col = st.selectbox("日の列", cols, index=cols.index(dp.get('day', cols[0])) if dp.get('day') in cols else 0)
+                        mapping['date_parts'] = {'year': y_col, 'month': m_col, 'day': d_col}
+                        mapping['date'] = None
+                    else:
+                        d_col = st.selectbox("日付の列", cols, index=cols.index(mapping.get('date', cols[0])) if mapping.get('date') in cols else 0)
+                        mapping['date'] = d_col
+                        mapping['date_parts'] = None
+                    
+                    mapping['amount'] = st.selectbox("金額の列", cols, index=cols.index(mapping.get('amount', cols[0])) if mapping.get('amount') in cols else 0)
+                    mapping['sender'] = st.selectbox("振込人/摘要の列", cols, index=cols.index(mapping.get('sender', cols[0])) if mapping.get('sender') in cols else 0)
+                
+                # Template label and confirm
+                template_label = st.text_input("テンプレート名（例: りそな銀行）", value="")
+                
+                if st.button("✅ このマッピングで確定・保存"):
+                    TemplateManager.save_template(cols, mapping, label=template_label)
+                    st.success(f"テンプレート「{template_label}」を保存しました！次回から自動適用されます。")
+                    needs_confirmation = False
+                    st.rerun()
+            
+            # --- Step 4: Normalize and preview matched data ---
+            if not needs_confirmation:
+                try:
+                    normalized = HeuristicMapper.normalize_bank_data(bank_df, mapping)
+                    st.write(f"🔄 入金データ抽出: **{len(normalized)} 件**")
+                    
+                    if len(normalized) == 0:
+                        st.warning("入金データが見つかりませんでした。マッピングを確認してください。")
+                    else:
+                        # Match to tenants
+                        tenants_df = db.fetch_tenants()
+                        payments_df = db.fetch_payments()
+                        engine = LogicEngine(tenants_df, payments_df)
+                        
+                        # Build mapping in old format for match_new_bank_data compatibility
+                        old_mapping = {
+                            'date': ['Date'],
+                            'amount': 'Amount',
+                            'sender': 'Summary',
+                            'type': None
+                        }
+                        new_entries = engine.match_new_bank_data(normalized, mapping=old_mapping)
+                        
+                        if new_entries:
+                            st.info(f"🎯 テナントマッチング: **{len(new_entries)} 件**")
+                            preview_df = pd.DataFrame(new_entries)
+                            st.dataframe(preview_df, use_container_width=True)
+                            
+                            if st.button("📥 確定して入金データを登録"):
+                                try:
+                                    db.upsert_payments(new_entries)
+                                    st.success(f"✅ {len(new_entries)} 件の入金データを登録しました！")
+                                    st.cache_data.clear()
+                                except Exception as e:
+                                    st.error(f"登録エラー: {e}")
+                        else:
+                            st.warning("新規の入金データは見つかりませんでした（既に登録済みか、マッチするテナントがありません）。")
+                except Exception as e:
+                    st.error(f"データ正規化エラー: {e}")
+                    
+                # Option to reset template
+                if st.button("🗑 テンプレートをリセット"):
+                    TemplateManager.delete_template(cols)
+                    st.info("テンプレートを削除しました。次回アップロード時に再確認されます。")
+                    st.rerun()
+
         except Exception as e:
             st.error(f"ファイル処理エラー: {e}")
+
 
     st.markdown("---")
     
