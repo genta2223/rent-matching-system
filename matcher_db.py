@@ -153,6 +153,20 @@ class TenantRecordDB:
         lcd_str = values.get('last_confirmed_date', '')
         self.last_confirmed_date = pd.to_datetime(lcd_str) if lcd_str else pd.NaT
         
+        # 8. auto_absorb features
+        absorb_raw = values.get('auto_absorb_enabled', False)
+        if isinstance(absorb_raw, str):
+            self.auto_absorb_enabled = absorb_raw.lower() in ('true', '1', 't', 'y', 'yes')
+        else:
+            self.auto_absorb_enabled = bool(absorb_raw)
+            
+        try:
+            self.auto_absorb_limit = float(values.get('auto_absorb_limit', 0.0))
+        except:
+            self.auto_absorb_limit = 0.0
+            
+        self.auto_absorb_label = str(values.get('auto_absorb_label', ''))
+        
         self.ledger_payments = []
         self.debts = [] 
 
@@ -283,12 +297,30 @@ class TenantRecordDB:
                         type_str = "全額" if is_full else "一部"
                         p['Allocations'].append({'Month': d['month'], 'Amount': alloc, 'IsFull': is_full})
                         alloc_parts.append(f"{desc_month}{type_str}({int(alloc):,}円)")
+                        
+                        # Auto-absorb explicit small variations AFTER fully satisfying a debt
+                        if is_full and self.auto_absorb_enabled and self.auto_absorb_limit > 0:
+                            if 0 < amount_to_alloc <= self.auto_absorb_limit:
+                                label = self.auto_absorb_label if self.auto_absorb_label else "別料金"
+                                alloc_parts.append(f"{label}({int(amount_to_alloc):,}円)")
+                                amount_to_alloc = 0.0
+                                break
+                                
                 if amount_to_alloc <= 0:
                     break
                     
             p['Surplus'] = amount_to_alloc
             if amount_to_alloc > 0:
-                alloc_parts.append(f"余剰金 {int(amount_to_alloc):,}円")
+                if self.auto_absorb_enabled and self.auto_absorb_limit > 0 and amount_to_alloc <= self.auto_absorb_limit:
+                    label = self.auto_absorb_label if self.auto_absorb_label else "別料金"
+                    alloc_parts.append(f"{label}({int(amount_to_alloc):,}円)")
+                    p['Surplus'] = 0.0
+                else:
+                    msg = f"余剰金 {int(amount_to_alloc):,}円"
+                    if self.auto_absorb_enabled and self.auto_absorb_limit > 0 and amount_to_alloc > self.auto_absorb_limit:
+                        label = self.auto_absorb_label if self.auto_absorb_label else "別料金"
+                        msg += f" (※{label}上限超過につき基準日更新を推奨)"
+                    alloc_parts.append(msg)
             
             # Format update
             base_desc = " / ".join(alloc_parts) if alloc_parts else "充当先なし"

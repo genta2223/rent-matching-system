@@ -57,6 +57,11 @@ with tab1:
             tenants_df['manual_adjustment'] = tenants_df['Values'].apply(lambda x: float(x.get('manual_adjustment', 0)))
             tenants_df['adjustment_memo'] = tenants_df['Values'].apply(lambda x: x.get('adjustment_memo', ''))
             
+            # Auto absorb fields
+            tenants_df['auto_absorb_enabled'] = tenants_df['Values'].apply(lambda x: bool(x.get('auto_absorb_enabled', False)))
+            tenants_df['auto_absorb_limit'] = tenants_df['Values'].apply(lambda x: float(x.get('auto_absorb_limit', 0.0)))
+            tenants_df['auto_absorb_label'] = tenants_df['Values'].apply(lambda x: x.get('auto_absorb_label', ''))
+            
             # Additional flags
             def get_clean_start(row):
                 vals = row.get('Values', {})
@@ -78,6 +83,7 @@ with tab1:
                 'PropertyID', 'Name', 'MonthlyRent', 
                 'is_clean_start', 'last_confirmed_date', 
                 'base_date', 'base_debt', 'base_surplus', 'manual_adjustment', 'adjustment_memo',
+                'auto_absorb_enabled', 'auto_absorb_limit', 'auto_absorb_label',
                 'BankMatchName1', 'BankMatchName2', 'BankMatchName3', 
                 'Memo', 'Agent', 'Manager', 'SeparateAccountManagement'
             ]
@@ -108,6 +114,9 @@ with tab1:
                             'base_surplus': record.pop('base_surplus', 0),
                             'manual_adjustment': record.pop('manual_adjustment', 0),
                             'adjustment_memo': record.pop('adjustment_memo', ''),
+                            'auto_absorb_enabled': record.pop('auto_absorb_enabled', False),
+                            'auto_absorb_limit': record.pop('auto_absorb_limit', 0.0),
+                            'auto_absorb_label': record.pop('auto_absorb_label', ''),
                             'is_clean_start': record.pop('is_clean_start', False),
                             'last_confirmed_date': record.pop('last_confirmed_date', '')
                         }
