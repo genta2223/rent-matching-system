@@ -66,10 +66,56 @@ class HeuristicMapper:
         max_score = 3  # date + amount + sender
 
         # --- 1. Detect DATE ---
+        # --- 1. Detect DATE ---
         # Check for split year/month/day columns first
+        
+        # 1-A. Try specific known patterns (Resona etc.) - relaxed match
+        # We need to find columns that distinguish Year/Month/Day.
+        # Strict match "年" fails for "取扱日付　年".
+        
+        def _find_component(keywords, must_contain=None, exclude_cols=None):
+            # Helper to find a column matching a keyword, optionally requiring another substring
+            # and strictly NOT in exclude_cols
+            if exclude_cols is None: exclude_cols = []
+            
+            for i, cl in enumerate(cols_lower):
+                col_original_name = cols[i]
+                if col_original_name in exclude_cols:
+                    continue
+                    
+                for kw in keywords:
+                     if kw in cl:
+                         if must_contain and must_contain not in cl:
+                             continue
+                         return cols[i]
+            return None
+
+        # Try to find Year/Month/Day columns
+        # First try exact/short matches
+        # Note: strict exact=True logic is already quite safe, but let's be systematic
         year_col = _find_col(cols, cols_lower, DATE_COMPONENT_YEAR, exact=True)
         month_col = _find_col(cols, cols_lower, DATE_COMPONENT_MONTH, exact=True)
         day_col = _find_col(cols, cols_lower, DATE_COMPONENT_DAY, exact=True)
+        
+        # If strict failed, try finding "日付...年" pattern (Resona style)
+        if not (year_col and month_col and day_col):
+             # Look for col containing "年" AND "日付" (e.g. "取扱日付　年")
+             year_col = _find_component(['年', 'year'], must_contain='日付') or _find_component(['年', 'year'], must_contain='date')
+             
+             # Exclude found year_col
+             exclude_for_month = [year_col] if year_col else []
+             month_col = _find_component(['月', 'month'], must_contain='日付', exclude_cols=exclude_for_month) or \
+                         _find_component(['月', 'month'], must_contain='date', exclude_cols=exclude_for_month)
+             
+             # Exclude found year/month cols
+             exclude_for_day = [c for c in [year_col, month_col] if c]
+             
+             # Special handling for DAY: "日付" contains "日", so strict check needed.
+             # If keyword is "日", it matches "日付" part. 
+             # We should look for "日" that is NOT part of "日付" if possible, or just rely on exclusion.
+             # Since Year/Month are already excluded, "取扱日付　日" should be the one left containing "日".
+             day_col = _find_component(['日', 'day'], must_contain='日付', exclude_cols=exclude_for_day) or \
+                       _find_component(['日', 'day'], must_contain='date', exclude_cols=exclude_for_day)
 
         if year_col and month_col and day_col:
             mapping['date_parts'] = {'year': year_col, 'month': month_col, 'day': day_col}
@@ -106,6 +152,31 @@ class HeuristicMapper:
             if any(v in DEPOSIT_VALUES for v in unique_vals):
                 mapping['deposit_filter'] = dep_col
 
+        # --- 5. EMERGENCY FALLBACK: Hardcoded O/P/Q columns (Index 14, 15, 16) ---
+        # If no date detected yet, and we have enough columns, assume Resona format
+        if not mapping['date'] and not mapping['date_parts']:
+            if len(cols) >= 17:
+                # O=14, P=15, Q=16 (0-indexed)
+                # Check if they look numeric-ish just to be safe? 
+                # User instruction is "Hardcoded fallback", so we trust the structure.
+                # But let's verify headers vaguely match expectation or just do it?
+                # User said "Header heuristic failed", so blindly trust indices if headers fail.
+                
+                # Check if these columns exist and assign them
+                col_y = cols[14]
+                col_m = cols[15]
+                col_d = cols[16]
+                
+                mapping['date_parts'] = {'year': col_y, 'month': col_m, 'day': col_d}
+                mapping['confidence'] = 0.9 # High confidence because it's a specific fallback
+                
+                # Also try to find Amount/Sender if missing
+                if not mapping['amount']:
+                     # Resona Amount usually around column 11 (L) or 12 (M)? 
+                     # Let's trust existing detection for amount for now, or use a heuristic if needed.
+                     # User only complained about DATE.
+                     pass
+
         mapping['confidence'] = score / max_score
         return mapping
 
@@ -140,7 +211,46 @@ class HeuristicMapper:
                 result = result[mask].copy()
 
         # Build Date column
-        if mapping.get('date_parts'):
+        # EMERGENCY OVERRIDE for Resona (Index 14, 15, 16)
+        # Even if mapping says otherwise (e.g. bad template), if we have 17+ cols, use these.
+        cols = result.columns.tolist()
+        if len(cols) >= 17:
+             try:
+                 # Assume 14=Year, 15=Month, 16=Day
+                 c_y = cols[14]
+                 c_m = cols[15]
+                 c_d = cols[16]
+                 
+                 # Check if they really look like dates?
+                 # User said "Force", so we just do it.
+                 # Ensure they are not empty?
+                 # Handle "2025.0" (float strings)
+                 def _safe_int_str(series):
+                     return pd.to_numeric(series, errors='coerce').fillna(0).astype(int).astype(str)
+
+                 result['Date'] = pd.to_datetime(
+                    _safe_int_str(result[c_y]) + '-' +
+                    _safe_int_str(result[c_m]).str.zfill(2) + '-' +
+                    _safe_int_str(result[c_d]).str.zfill(2),
+                    format='%Y-%m-%d', errors='coerce'
+                 )
+                 print("DEBUG: Force-used O/P/Q columns for Date normalization")
+             except Exception as e:
+                 print(f"DEBUG: Failed to force O/P/Q: {e}")
+                 # Fallback to mapping
+                 if mapping.get('date_parts'):
+                    parts = mapping['date_parts']
+                    result['Date'] = pd.to_datetime(
+                        result[parts['year']].astype(int).astype(str) + '-' +
+                        result[parts['month']].astype(int).astype(str).str.zfill(2) + '-' +
+                        result[parts['day']].astype(int).astype(str).str.zfill(2),
+                        format='%Y-%m-%d', errors='coerce'
+                    )
+                 elif mapping.get('date'):
+                    result['Date'] = pd.to_datetime(result[mapping['date']], errors='coerce')
+                 else:
+                    raise ValueError("日付列が特定できません。手動でマッピングしてください。")
+        elif mapping.get('date_parts'):
             parts = mapping['date_parts']
             result['Date'] = pd.to_datetime(
                 result[parts['year']].astype(int).astype(str) + '-' +

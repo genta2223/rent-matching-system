@@ -1,0 +1,64 @@
+--- 1. Loading CSV: C:\Users\genta\Dropbox\00_不動産関連\04_不動産\rent-matching-system\private_data\20260220103511.csv ---
+Shape: (68, 21)
+--- Columns ---
+0: レコード区分
+1: 年
+2: 月
+3: 日
+4: 時
+5: 分
+6: 連絡先名
+7: 金融機関名
+8: 支店名
+9: 口座番号区分
+10: 口座種別
+11: 口座番号
+12: 再送表示
+13: 取引名
+14: 取扱日付　年
+15: 取扱日付　月
+16: 取扱日付　日
+17: 金額
+18: 取引後残高
+19: 摘要
+20: コメント
+
+--- Content of potential Date Columns (14, 15, 16) ---
+   取扱日付　年  取扱日付　月  取扱日付　日
+0  2025.0    12.0    31.0
+1  2026.0     1.0     2.0
+2  2026.0     1.0     2.0
+3  2026.0     1.0     5.0
+4  2026.0     1.0     5.0
+
+--- 2. Checking Template (Hash) ---
+Calculated Hash: 731cc86e89da49cb
+Template Query Response: 200
+FOUND TEMPLATE: [
+  {
+    "id": 2,
+    "header_hash": "731cc86e89da49cb",
+    "user_id": null,
+    "label": "",
+    "mapping": "{\"date\": null, \"date_parts\": {\"year\": \"年\", \"month\": \"月\", \"day\": \"日\"}, \"amount\": \"金額\", \"sender\": \"摘要\", \"deposit_filter\": null}",
+    "columns": "[\"レコード区分\", \"年\", \"月\", \"日\", \"時\", \"分\", \"連絡先名\", \"金融機関名\", \"支店名\", \"口座番号区分\", \"口座種別\", \"口座番号\", \"再送表示\", \"取引名\", \"取扱日付　年\", \"取扱日付　月\", \"取扱日付　日\", \"金額\", \"取引後残高\", \"摘要\", \"コメント\"]",
+    "shared": false,
+    "created_at": "2026-02-20T07:01:27.122354+00:00"
+  }
+]
+
+--- 3. Testing HeuristicMapper ---
+Suggested Mapping: {'date': None, 'date_parts': {'year': '年', 'month': '月', 'day': '日'}, 'amount': '金額', 'sender': '摘要', 'deposit_filter': None, 'confidence': 1.0}
+Using Saved Mapping: {'date': None, 'date_parts': {'year': '年', 'month': '月', 'day': '日'}, 'amount': '金額', 'sender': '摘要', 'deposit_filter': None}
+
+--- 4. Testing Normalize ---
+DEBUG: Force-used O/P/Q columns for Date normalization
+Normalized Count: 32
+        Date  ...          Summary
+0 2025-12-31  ...  振込　KNADANANDA S
+1 2026-01-05  ...       振込　ﾄﾐﾉ ﾋﾛｷ
+2 2026-01-07  ...    振込　ｻｶｸﾞﾁ ｹﾞﾝﾀ
+3 2026-01-08  ...  振込　ｵｷﾅﾜｺｳｺﾔｴﾔﾏｼ
+4 2026-01-09  ...     振込　ﾌｼﾞﾜﾗ ﾕｲｶ
+
+[5 rows x 3 columns]

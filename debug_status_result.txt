@@ -1,0 +1,27 @@
+Fetching tenants...
+Fetching payments...
+Initializing LogicEngine...
+Running process_status...
+DEBUG: Prop 1 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 2 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 3 - Ok: 2026/01/15, Mgmt: False, Status: 正常
+DEBUG: Prop 4 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 5 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 6 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 7 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 8 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 9 - Ok: 2025/12/17, Mgmt: False, Status: 正常
+DEBUG: Prop 12 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 13 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 15 - Ok: ok, Mgmt: False, Status: 正常
+DEBUG: Prop 14 - Ok: 2026/1/30 , Mgmt: False, Status: 正常
+
+--- Result DataFrame Head ---
+  PropertyID  ...                                          LastAlloc
+0          1  ...                         入金日:2026-02-04 余剰金 35,000円
+1          2  ...                         入金日:2026-01-28 余剰金 60,000円
+2          3  ...  入金日:2026-02-17 2026年02月分全額(29,500円) / 2026年03月...
+3          4  ...                         入金日:2026-01-27 余剰金 97,000円
+4          5  ...                         入金日:2026-01-30 余剰金 76,650円
+
+[5 rows x 4 columns]

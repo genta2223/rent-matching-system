@@ -44,12 +44,43 @@ with tab1:
             
             # Extract common nested fields
             tenants_df['BankMatchName1'] = tenants_df['Values'].apply(lambda x: x.get('BankMatchName1', ''))
+            tenants_df['BankMatchName2'] = tenants_df['Values'].apply(lambda x: x.get('BankMatchName2', ''))
+            tenants_df['BankMatchName3'] = tenants_df['Values'].apply(lambda x: x.get('BankMatchName3', ''))
             tenants_df['Agent'] = tenants_df['Values'].apply(lambda x: x.get('Agent', ''))
             tenants_df['Manager'] = tenants_df['Values'].apply(lambda x: x.get('Manager', ''))
             tenants_df['SeparateAccountManagement'] = tenants_df['Values'].apply(lambda x: x.get('SeparateAccountManagement', '0'))
             
+            # New fields for fixed base date logic
+            tenants_df['base_date'] = tenants_df['Values'].apply(lambda x: x.get('base_date', '2026-02-13'))
+            tenants_df['base_debt'] = tenants_df['Values'].apply(lambda x: float(x.get('base_debt', 0)))
+            tenants_df['base_surplus'] = tenants_df['Values'].apply(lambda x: float(x.get('base_surplus', 0)))
+            tenants_df['manual_adjustment'] = tenants_df['Values'].apply(lambda x: float(x.get('manual_adjustment', 0)))
+            tenants_df['adjustment_memo'] = tenants_df['Values'].apply(lambda x: x.get('adjustment_memo', ''))
+            
+            # Additional flags
+            def get_clean_start(row):
+                vals = row.get('Values', {})
+                if 'is_clean_start' in vals:
+                    raw = vals['is_clean_start']
+                    if isinstance(raw, str): return raw.lower() in ('true', '1', 't', 'y', 'yes')
+                    return bool(raw)
+                try:
+                    debt = float(vals.get('base_debt', row.get('BaseDebtAmount', 0)))
+                except:
+                    debt = 0.0
+                return debt <= 0
+
+            tenants_df['is_clean_start'] = tenants_df.apply(get_clean_start, axis=1)
+            tenants_df['last_confirmed_date'] = tenants_df['Values'].apply(lambda x: x.get('last_confirmed_date', ''))
+            
             # Reorder columns
-            cols = ['PropertyID', 'Name', 'MonthlyRent', 'BankMatchName1', 'Memo', 'Agent', 'Manager', 'SeparateAccountManagement', 'BaseDebtAmount', 'BaseDebtDate']
+            cols = [
+                'PropertyID', 'Name', 'MonthlyRent', 
+                'is_clean_start', 'last_confirmed_date', 
+                'base_date', 'base_debt', 'base_surplus', 'manual_adjustment', 'adjustment_memo',
+                'BankMatchName1', 'BankMatchName2', 'BankMatchName3', 
+                'Memo', 'Agent', 'Manager', 'SeparateAccountManagement'
+            ]
             other_cols = [c for c in tenants_df.columns if c not in cols and c != 'Values']
             tenants_df = tenants_df[cols + other_cols]
 
@@ -67,9 +98,18 @@ with tab1:
                         record = row.to_dict()
                         values = {
                             'BankMatchName1': record.pop('BankMatchName1', None),
+                            'BankMatchName2': record.pop('BankMatchName2', None),
+                            'BankMatchName3': record.pop('BankMatchName3', None),
                             'Agent': record.pop('Agent', None),
                             'Manager': record.pop('Manager', None),
-                            'SeparateAccountManagement': record.pop('SeparateAccountManagement', '0')
+                            'SeparateAccountManagement': record.pop('SeparateAccountManagement', '0'),
+                            'base_date': record.pop('base_date', '2026-02-13'),
+                            'base_debt': record.pop('base_debt', 0),
+                            'base_surplus': record.pop('base_surplus', 0),
+                            'manual_adjustment': record.pop('manual_adjustment', 0),
+                            'adjustment_memo': record.pop('adjustment_memo', ''),
+                            'is_clean_start': record.pop('is_clean_start', False),
+                            'last_confirmed_date': record.pop('last_confirmed_date', '')
                         }
                         record['Values'] = values
                         records.append(record)
