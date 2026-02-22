@@ -27,7 +27,7 @@ if st.button("表示データ更新"):
     st.cache_data.clear()
 
 # --- Tabs ---
-tab1, tab2, tab3 = st.tabs(["入居者台帳 (Rent Roll)", "入金明細 (Ledger)", "管理ツール"])
+tab1, tab2, tab3, tab4 = st.tabs(["入居者台帳 (Rent Roll)", "入金明細 (Ledger)", "管理ツール", "✨ プレミアムダッシュボード"])
 
 with tab1:
     st.subheader("入居者一覧")
@@ -556,3 +556,78 @@ with tab3:
             )
         except Exception as e:
             st.error(f"計算エラー: {e}")
+
+with tab4:
+    st.subheader("Luxury Executive Overview")
+    try:
+        tenants_df = db.fetch_tenants()
+        payments_df = db.fetch_payments()
+        engine = LogicEngine(tenants_df, payments_df)
+        status_df = engine.process_status()
+        
+        # 1. Calculate Metrics
+        collected_rent = status_df['Rent'].sum() - status_df['BalanceDue'].sum()
+        expected_rent = status_df['Rent'].sum()
+        overdue_tenants = len(status_df[status_df['Status'] == '滞納あり'])
+        active_tenants = len(status_df)
+        occupancy_rate = 94 # Placeholder or calculate if data available
+        target_pct = int((collected_rent / expected_rent * 100)) if expected_rent > 0 else 0
+        
+        # 2. Prepare Tenant Data for UI
+        ui_tenants = []
+        for _, row in status_df.iterrows():
+            ui_tenants.append({
+                "name": row['Name'],
+                "property": row['PropertyID'],
+                "rent": int(row['Rent']),
+                "balance": int(row['BalanceDue']),
+                "status": row['Status']
+            })
+            
+        dashboard_data = {
+            "metrics": {
+                "collectedRent": int(collected_rent),
+                "expectedRent": int(expected_rent),
+                "overdueCount": overdue_tenants,
+                "activeTenants": active_tenants,
+                "occupancyRate": occupancy_rate,
+                "targetPct": target_pct
+            },
+            "tenants": ui_tenants
+        }
+        
+        # 3. Read UI Files
+        import os
+        import json
+        
+        base_path = os.path.join(os.getcwd(), "ui-demo")
+        with open(os.path.join(base_path, "index.html"), "r", encoding="utf-8") as f:
+            html_content = f.read()
+            
+        with open(os.path.join(base_path, "style.css"), "r", encoding="utf-8") as f:
+            css_content = f.read()
+            
+        with open(os.path.join(base_path, "app.js"), "r", encoding="utf-8") as f:
+            js_content = f.read()
+            
+        # 4. Inject Data and Assets
+        # Inject CSS
+        html_content = html_content.replace(
+            '<link rel="stylesheet" href="style.css">',
+            f'<style>{css_content}</style>'
+        )
+        # Inject JS and Data
+        data_script = f"<script>window.DASHBOARD_DATA = {json.dumps(dashboard_data, ensure_ascii=False)};</script>"
+        html_content = html_content.replace(
+            '<script src="app.js"></script>',
+            f'{data_script}<script>{js_content}</script>'
+        )
+        
+        # Remove absolute link to local files if any (sidebar background etc) or just ensure it works
+        # Since we use st.components, it's an iframe. 
+        
+        import streamlit.components.v1 as components
+        components.html(html_content, height=1000, scrolling=True)
+        
+    except Exception as e:
+        st.error(f"ダッシュボード生成エラー: {e}")

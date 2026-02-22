@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rental Luxe | Executive Overview</title>
+    <link rel="stylesheet" href="style.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide-static@0.344.0/font/lucide.min.css">
+</head>
+
+<body class="bg-page">
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-top">
+                <div class="logo-area">
+                    <div class="logo-mark">R</div>
+                    <span class="logo-text">RENTAL LUXE</span>
+                </div>
+                <nav class="navigation">
+                    <a href="#" class="nav-item active">
+                        <i class="icon-layout-dashboard"></i>
+                        <span>ダッシュボード</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <i class="icon-users"></i>
+                        <span>入居者管理</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <i class="icon-credit-card"></i>
+                        <span>入金管理</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <i class="icon-file-text"></i>
+                        <span>レポート分析</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <i class="icon-settings"></i>
+                        <span>システム設定</span>
+                    </a>
+                </nav>
+            </div>
+            <div class="sidebar-bottom">
+                <div class="upgrade-box">
+                    <h3>プレミアムアクセス</h3>
+                    <p>高度な分析機能と自動レポートをアンロックします。</p>
+                    <button class="btn-primary-full">今すぐアップグレード</button>
+                </div>
+                <div class="user-section">
+                    <div class="avatar">G</div>
+                    <div class="user-info">
+                        <span class="user-name">Genta</span>
+                        <span class="user-role">管理者</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="page-header">
+                <div class="header-left">
+                    <span class="subtitle uppercase">エグゼクティブ概要</span>
+                    <h1 class="page-title">家賃管理システム</h1>
+                </div>
+                <div class="header-actions">
+                    <button class="btn-secondary">
+                        <i class="icon-activity"></i>
+                        <span>データ分析</span>
+                    </button>
+                    <button class="btn-primary">
+                        <i class="icon-plus"></i>
+                        <span>新規入居者登録</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Metrics -->
+            <section class="metrics-grid">
+                <div class="metric-card">
+                    <span class="metric-label">当月回収額</span>
+                    <div class="metric-value">¥2,480,000</div>
+                    <div class="metric-change">
+                        <i class="icon-trending-up gold"></i>
+                        <span>目標の 98%</span>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">予想総額</span>
+                    <div class="metric-value">¥2,580,000</div>
+                    <div class="metric-change">
+                        <i class="icon-activity gold"></i>
+                        <span>月次ベース</span>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">延滞者数</span>
+                    <div class="metric-value text-gold">5</div>
+                    <div class="metric-change">
+                        <i class="icon-alert-circle gold"></i>
+                        <span>早急な対応が必要</span>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">稼働入居者</span>
+                    <div class="metric-value">124</div>
+                    <div class="metric-change">
+                        <i class="icon-users gold"></i>
+                        <span>入居率 94%</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Table Section -->
+            <section class="table-section">
+                <div class="section-header">
+                    <h2 class="section-title">入居者台帳</h2>
+                    <button class="btn-secondary">
+                        <i class="icon-download"></i>
+                        <span>PDFエクスポート</span>
+                    </button>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 30%;">入居者名</th>
+                                <th style="width: 15%;">物件番号</th>
+                                <th style="width: 20%;">月額賃料</th>
+                                <th style="width: 20%;">現在残高</th>
+                                <th style="width: 15%;">状態</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tenant-list">
+                            <!-- Rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>
