@@ -162,7 +162,7 @@ def generate_invoice_pdf(tenant_data):
     c.setFont(font_name, 10)
     c.drawString(50, footer_y, "【お振込先】")
     c.setFont(font_name, 11)
-    c.drawString(70, footer_y - 20, "りそな銀行 住道（ｽﾐﾉﾄﾞｳ）支店 普通 3041570 サカグチ ゲンタ")
+    c.drawString(70, footer_y - 20, "りそな銀行 住道（スミノドウ）支店 普通 3041570 サカグチ ゲンタ")
     
     c.setFont(font_name, 9)
     c.drawString(50, footer_y - 45, "※ 本状と行き違いでお支払い済みの場合は、何卒ご容赦ください。")

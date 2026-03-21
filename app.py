@@ -52,6 +52,12 @@ with tab1:
             
             # New fields for fixed base date logic
             tenants_df['base_date'] = tenants_df['Values'].apply(lambda x: x.get('base_date', '2026-02-13'))
+            
+            # Additional billing info
+            tenants_df['BillingZip'] = tenants_df['Values'].apply(lambda x: x.get('BillingZip', ''))
+            tenants_df['BillingAddress'] = tenants_df['Values'].apply(lambda x: x.get('BillingAddress', ''))
+            tenants_df['BillingName'] = tenants_df['Values'].apply(lambda x: x.get('BillingName', ''))
+            
             tenants_df['base_debt'] = tenants_df['Values'].apply(lambda x: float(x.get('base_debt', 0)))
             tenants_df['base_surplus'] = tenants_df['Values'].apply(lambda x: float(x.get('base_surplus', 0)))
             tenants_df['manual_adjustment'] = tenants_df['Values'].apply(lambda x: float(x.get('manual_adjustment', 0)))
@@ -80,7 +86,7 @@ with tab1:
             
             # Reorder columns
             cols = [
-                'PropertyID', 'Name', 'MonthlyRent', 
+                'PropertyID', 'Name', 'BillingName', 'BillingZip', 'BillingAddress', 'MonthlyRent', 
                 'is_clean_start', 'last_confirmed_date', 
                 'base_date', 'base_debt', 'base_surplus', 'manual_adjustment', 'adjustment_memo',
                 'auto_absorb_enabled', 'auto_absorb_limit', 'auto_absorb_label',
@@ -103,6 +109,9 @@ with tab1:
                     for _, row in edited_df.iterrows():
                         record = row.to_dict()
                         values = {
+                            'BillingZip': record.pop('BillingZip', ''),
+                            'BillingAddress': record.pop('BillingAddress', ''),
+                            'BillingName': record.pop('BillingName', ''),
                             'BankMatchName1': record.pop('BankMatchName1', None),
                             'BankMatchName2': record.pop('BankMatchName2', None),
                             'BankMatchName3': record.pop('BankMatchName3', None),

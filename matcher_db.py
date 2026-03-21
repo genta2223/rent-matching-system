@@ -74,6 +74,11 @@ class TenantRecordDB:
         self.zip = str(data.get('Zip', ""))
         self.address = str(data.get('Address', ""))
         
+        # Additional billing info
+        self.billing_zip = values.get('BillingZip', '')
+        self.billing_address = values.get('BillingAddress', '')
+        self.billing_name = values.get('BillingName', '')
+        
         self.agent = values.get('Agent', '')
         self.manager = values.get('Manager', '')
 
@@ -370,9 +375,9 @@ class TenantRecordDB:
                  'AllocationDesc': desc
              })
         return {
-            'Zip': self.zip,
-            'Address': self.address,
-            'Name': self.name,
+            'Zip': self.billing_zip if self.billing_zip else self.zip,
+            'Address': self.billing_address if self.billing_address else self.address,
+            'Name': self.billing_name if self.billing_name else self.name,
             'PropertyID': self.property_id,
             'TotalDue': int(total_due),
             'RawPaymentsCount': len(self.ledger_payments),
