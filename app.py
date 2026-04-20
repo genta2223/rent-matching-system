@@ -58,15 +58,15 @@ with tab1:
             tenants_df['BillingAddress'] = tenants_df['Values'].apply(lambda x: x.get('BillingAddress', ''))
             tenants_df['BillingName'] = tenants_df['Values'].apply(lambda x: x.get('BillingName', ''))
             
-            tenants_df['base_debt'] = tenants_df['Values'].apply(lambda x: float(x.get('base_debt', 0)))
-            tenants_df['base_surplus'] = tenants_df['Values'].apply(lambda x: float(x.get('base_surplus', 0)))
-            tenants_df['manual_adjustment'] = tenants_df['Values'].apply(lambda x: float(x.get('manual_adjustment', 0)))
-            tenants_df['adjustment_memo'] = tenants_df['Values'].apply(lambda x: x.get('adjustment_memo', ''))
+            tenants_df['base_debt'] = tenants_df['Values'].apply(lambda x: float(x.get('base_debt') or 0))
+            tenants_df['base_surplus'] = tenants_df['Values'].apply(lambda x: float(x.get('base_surplus') or 0))
+            tenants_df['manual_adjustment'] = tenants_df['Values'].apply(lambda x: float(x.get('manual_adjustment') or 0))
+            tenants_df['adjustment_memo'] = tenants_df['Values'].apply(lambda x: x.get('adjustment_memo') or '')
             
             # Auto absorb fields
-            tenants_df['auto_absorb_enabled'] = tenants_df['Values'].apply(lambda x: bool(x.get('auto_absorb_enabled', False)))
-            tenants_df['auto_absorb_limit'] = tenants_df['Values'].apply(lambda x: float(x.get('auto_absorb_limit', 0.0)))
-            tenants_df['auto_absorb_label'] = tenants_df['Values'].apply(lambda x: x.get('auto_absorb_label', ''))
+            tenants_df['auto_absorb_enabled'] = tenants_df['Values'].apply(lambda x: bool(x.get('auto_absorb_enabled')))
+            tenants_df['auto_absorb_limit'] = tenants_df['Values'].apply(lambda x: float(x.get('auto_absorb_limit') or 0.0))
+            tenants_df['auto_absorb_label'] = tenants_df['Values'].apply(lambda x: x.get('auto_absorb_label') or '')
             
             # Additional flags
             def get_clean_start(row):
@@ -108,6 +108,16 @@ with tab1:
                     records = []
                     for _, row in edited_df.iterrows():
                         record = row.to_dict()
+                        
+                        pid = record.get('PropertyID')
+                        if pd.isna(pid) or str(pid).strip() == '':
+                            continue
+                            
+                        pid_str = str(pid).strip()
+                        if pid_str.endswith('.0'):
+                            pid_str = pid_str[:-2]
+                        record['PropertyID'] = pid_str
+                        
                         values = {
                             'BillingZip': record.pop('BillingZip', ''),
                             'BillingAddress': record.pop('BillingAddress', ''),
@@ -150,7 +160,9 @@ with tab1:
         else:
             st.info("入居者データがありません。")
     except Exception as e:
+        import traceback
         st.error(f"読み込みエラー: {e}")
+        st.code(traceback.format_exc())
 
 with tab2:
     st.subheader("入金履歴")
