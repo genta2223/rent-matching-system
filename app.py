@@ -35,6 +35,10 @@ with tab1:
         tenants_df = db.fetch_tenants()
         
         if not tenants_df.empty:
+            # Sort numerically by PropertyID and ensure it's treated as a number for UI sorting
+            tenants_df['PropertyID'] = pd.to_numeric(tenants_df['PropertyID'], errors='coerce').astype('Int64')
+            tenants_df = tenants_df.sort_values('PropertyID')
+
             # Display Key Metrics
             total_rent = tenants_df['MonthlyRent'].sum()
             st.metric("月額家賃総額（想定）", f"¥{total_rent:,}")
@@ -110,12 +114,11 @@ with tab1:
                         record = row.to_dict()
                         
                         pid = record.get('PropertyID')
-                        if pd.isna(pid) or str(pid).strip() == '':
+                        if pd.isna(pid) or str(pid).strip() == '' or str(pid).lower() == 'nan':
                             continue
                             
-                        pid_str = str(pid).strip()
-                        if pid_str.endswith('.0'):
-                            pid_str = pid_str[:-2]
+                        # Ensure it's a clean string (remove .0 and handle integer/NA)
+                        pid_str = str(pid).split('.')[0].strip()
                         record['PropertyID'] = pid_str
                         
                         values = {

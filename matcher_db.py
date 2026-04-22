@@ -293,7 +293,7 @@ class TenantRecordDB:
                         ts = pd.Timestamp(d['month'])
                         
                         if d.get('is_manual_adjustment'):
-                            desc_month = "手動調整分"
+                            desc_month = self.adjustment_memo if self.adjustment_memo else "手動調整分"
                         elif d.get('is_carry_over'):
                             desc_month = f"基準日残高(〜{ts.strftime('%Y年%m月分')})"
                         else:
@@ -635,7 +635,11 @@ class LogicEngine:
             
             print(f"DEBUG: Prop {t.property_id} - Ok: {t.delinquency_memo[:10]}, Mgmt: {t.separate_mgmt}, Status: {status}")
             
-        return pd.DataFrame(results)
+        df = pd.DataFrame(results)
+        if not df.empty:
+            df['PropertyID'] = pd.to_numeric(df['PropertyID'], errors='coerce').astype('Int64')
+            df = df.sort_values('PropertyID')
+        return df
 class BankMapper:
     @staticmethod
     def suggest_mapping(df):
