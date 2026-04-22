@@ -90,9 +90,10 @@ with tab1:
             
             # Reorder columns
             cols = [
-                'PropertyID', 'Name', 'BillingName', 'BillingZip', 'BillingAddress', 'MonthlyRent', 
+                'PropertyID', 'Name', 'Zip', 'Address', 'Tel', 'MonthlyRent', 
                 'is_clean_start', 'last_confirmed_date', 
                 'base_date', 'base_debt', 'base_surplus', 'manual_adjustment', 'adjustment_memo',
+                'BillingName', 'BillingZip', 'BillingAddress',
                 'auto_absorb_enabled', 'auto_absorb_limit', 'auto_absorb_label',
                 'BankMatchName1', 'BankMatchName2', 'BankMatchName3', 
                 'Memo', 'Agent', 'Manager', 'SeparateAccountManagement'
