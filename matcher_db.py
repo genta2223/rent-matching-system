@@ -503,6 +503,8 @@ class LogicEngine:
                 continue
             
             matched_room = None
+            matched_row = None
+            matching_tenant_rows = []
             
             # Match Logic
             for _, row in self.tenants_df.iterrows():
@@ -514,24 +516,64 @@ class LogicEngine:
                     normalize_name(values.get('BankMatchName3'))
                 ]
                 if any(c in summary for c in cands if c):
-                    matched_room = str(row['PropertyID'])
-                    break
+                    matching_tenant_rows.append(row)
             
-            if matched_room:
+            if len(matching_tenant_rows) == 1:
+                matched_row = matching_tenant_rows[0]
+            elif len(matching_tenant_rows) > 1:
+                # Disambiguate by rent amount
+                rent_matched_rows = []
+                for r in matching_tenant_rows:
+                    try:
+                        t_rent = float(r.get('MonthlyRent') or 0)
+                    except:
+                        t_rent = 0.0
+                    if abs(t_rent - float(amount)) < 0.01:
+                        rent_matched_rows.append(r)
+                
+                if len(rent_matched_rows) == 1:
+                    matched_row = rent_matched_rows[0]
+                else:
+                    # Check multiples (1x, 2x, etc.)
+                    multiple_matched_rows = []
+                    for r in matching_tenant_rows:
+                        try:
+                            t_rent = float(r.get('MonthlyRent') or 0)
+                        except:
+                            t_rent = 0.0
+                        if t_rent > 0:
+                            ratio = float(amount) / t_rent
+                            if abs(ratio - round(ratio)) < 0.01:
+                                multiple_matched_rows.append(r)
+                    if len(multiple_matched_rows) == 1:
+                        matched_row = multiple_matched_rows[0]
+                    else:
+                        # Fallback to the first matched tenant
+                        matched_row = matching_tenant_rows[0]
+            
+            if matched_row is not None:
+                matched_room = str(matched_row['PropertyID'])
                 # Extract Date - FORCE RESONA O/P/Q (Indices 14, 15, 16)
                 # User Requirement: Rigidly use these columns. Ignore Mapper.
                 try:
-                    # REVERT TO IDEMPOTENT DATE EXTRACTION
-                    # The input 'tx' is a row from the NORMALIZED dataframe (Date, Amount, Summary).
-                    # 'csv_ai_mapper.py' has already used the O/P/Q fallback to create this 'Date' column.
-                    # So we just trust 'Date'.
-                    
-                    if date_parts:
+                    # Fallback to indices 14, 15, 16 if raw dataframe with >= 17 columns
+                    cols_list = tx.index.tolist()
+                    if len(cols_list) >= 17:
+                        y = tx.iloc[14]
+                        m = tx.iloc[15]
+                        d = tx.iloc[16]
+                        y_str = str(int(float(y))) if not pd.isna(y) else ""
+                        m_str = str(int(float(m))) if not pd.isna(m) else ""
+                        d_str = str(int(float(d))) if not pd.isna(d) else ""
+                        payment_date = f"{y_str.zfill(4)}-{m_str.zfill(2)}-{d_str.zfill(2)}"
+                        val = f"{y}/{m}/{d}"
+                    elif date_parts:
                          # This path is for raw DF (not used by app.py currently)
                          y = tx.get(date_parts['year'])
                          m = tx.get(date_parts['month'])
                          d = tx.get(date_parts['day'])
                          payment_date = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+                         val = payment_date
                     elif isinstance(date_col, list):
                          val = tx.get(date_col[0])
                          payment_date = pd.to_datetime(val).strftime("%Y-%m-%d")
@@ -546,8 +588,13 @@ class LogicEngine:
                     print(f"Skipping row due to invalid date: {e}")
                     continue
 
+                t_values = matched_row.get('Values', {}) if isinstance(matched_row.get('Values'), dict) else {}
                 new_ledger_entries.append({
                     'PropertyID': matched_room,
+                    'Name': matched_row.get('Name', ''),
+                    'BankMatchName1': t_values.get('BankMatchName1', ''),
+                    'BankMatchName2': t_values.get('BankMatchName2', ''),
+                    'BankMatchName3': t_values.get('BankMatchName3', ''),
                     'Date': payment_date,
                     'Amount': amount,
                     'Summary': summary_raw,
@@ -570,7 +617,8 @@ class LogicEngine:
             d = str(row.get(dp['day'], ''))
             date_str = y + m + d
         else:
-            date_cols = mapping.get('date', [])
+            date_cols = mapping.get('date')
+            if date_cols is None: date_cols = []
             if isinstance(date_cols, str): date_cols = [date_cols]
             # Use safe get
             date_str = "".join([str(row.get(c, '')) for c in date_cols])

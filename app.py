@@ -308,8 +308,22 @@ with tab3:
                             
                             if st.button("📥 確定して入金データを登録"):
                                 try:
-                                    db.upsert_payments(new_entries)
-                                    st.success(f"✅ {len(new_entries)} 件の入金データを登録しました！")
+                                    # Clean extra columns not stored in DB (Name, BankMatchName 1-3)
+                                    db_entries = []
+                                    for entry in new_entries:
+                                        db_entry = {
+                                            'PropertyID': entry['PropertyID'],
+                                            'Date': entry['Date'],
+                                            'Amount': entry['Amount'],
+                                            'Summary': entry['Summary'],
+                                            'TransactionKey': entry['TransactionKey']
+                                        }
+                                        if 'AllocationDesc' in entry:
+                                            db_entry['AllocationDesc'] = entry['AllocationDesc']
+                                        db_entries.append(db_entry)
+                                    
+                                    db.upsert_payments(db_entries)
+                                    st.success(f"✅ {len(db_entries)} 件の入金データを登録しました！")
                                     st.cache_data.clear()
                                 except Exception as e:
                                     st.error(f"登録エラー: {e}")
