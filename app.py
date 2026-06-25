@@ -154,7 +154,7 @@ with tab1:
                                     'Zip': new_zip.strip(),
                                     'Address': new_address.strip(),
                                     'Tel': new_tel.strip(),
-                                    'MonthlyRent': float(new_rent),
+                                    'MonthlyRent': int(new_rent),
                                     'Values': {
                                         'BankMatchName1': new_match1.strip(),
                                         'BankMatchName2': new_match2.strip(),
