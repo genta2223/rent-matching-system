@@ -101,10 +101,93 @@ with tab1:
             other_cols = [c for c in tenants_df.columns if c not in cols and c != 'Values']
             tenants_df = tenants_df[cols + other_cols]
 
+            # Calculate next ID
+            valid_ids = pd.to_numeric(tenants_df['PropertyID'], errors='coerce').dropna()
+            next_pid = int(valid_ids.max() + 1) if not valid_ids.empty else 1
+
+            # Expander for adding a new tenant
+            with st.expander("➕ 新規入居者を追加する"):
+                with st.form("new_tenant_form", clear_on_submit=True):
+                    st.markdown(f"### 新規入居者登録 (自動連番 物件番号: **{next_pid}**)")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        new_name = st.text_input("名前 (Name) *", value="")
+                        new_zip = st.text_input("郵便番号 (Zip)", value="")
+                        new_address = st.text_area("住所 (Address)", value="", height=100)
+                        new_tel = st.text_input("電話番号 (Tel)", value="")
+                        new_rent = st.number_input("月額家賃 (Monthly Rent)", min_value=0, value=0, step=1000)
+                        new_is_clean = st.checkbox("期首正常スタート (Is Clean Start)", value=True)
+                    with col2:
+                        new_match1 = st.text_input("照合名義1 (BankMatchName1)", value="")
+                        new_match2 = st.text_input("照合名義2 (BankMatchName2)", value="")
+                        new_match3 = st.text_input("照合名義3 (BankMatchName3)", value="")
+                        new_base_date = st.text_input("基準日 (Base Date)", value="2026-02-13")
+                        new_base_debt = st.number_input("期首滞納額 (Base Debt)", min_value=0, value=0, step=1000)
+                        new_base_surplus = st.number_input("期首預り金 (Base Surplus)", min_value=0, value=0, step=1000)
+                    
+                    with st.expander("⚙️ 詳細情報 (代理店・請求先住所・自動相殺など)"):
+                        col3, col4 = st.columns(2)
+                        with col3:
+                            new_bill_name = st.text_input("請求宛名 (Billing Name)", value="")
+                            new_bill_zip = st.text_input("請求郵便番号 (Billing Zip)", value="")
+                            new_bill_address = st.text_input("請求住所 (Billing Address)", value="")
+                            new_agent = st.text_input("代理店 (Agent)", value="")
+                            new_manager = st.text_input("管理会社 (Manager)", value="")
+                            new_sep_mgmt = st.selectbox("別口座管理 (Separate Account Management)", ["0", "1"], index=0)
+                        with col4:
+                            new_manual_adj = st.number_input("手動調整額 (Manual Adjustment)", value=0, step=1000)
+                            new_adj_memo = st.text_input("調整メモ (Adjustment Memo)", value="")
+                            new_absorb_enabled = st.checkbox("自動相殺有効 (Auto Absorb)", value=False)
+                            new_absorb_limit = st.number_input("自動相殺上限額 (Limit)", min_value=0.0, value=0.0, step=1000.0)
+                            new_absorb_label = st.text_input("自動相殺ラベル (Label)", value="")
+                            
+                    submitted = st.form_submit_button("📥 この内容で新規入居者を追加")
+                    if submitted:
+                        if not new_name.strip():
+                            st.error("名前は必須入力です。")
+                        else:
+                            try:
+                                new_record = {
+                                    'PropertyID': str(next_pid),
+                                    'Name': new_name.strip(),
+                                    'Zip': new_zip.strip(),
+                                    'Address': new_address.strip(),
+                                    'Tel': new_tel.strip(),
+                                    'MonthlyRent': float(new_rent),
+                                    'Values': {
+                                        'BankMatchName1': new_match1.strip(),
+                                        'BankMatchName2': new_match2.strip(),
+                                        'BankMatchName3': new_match3.strip(),
+                                        'Agent': new_agent.strip(),
+                                        'Manager': new_manager.strip(),
+                                        'SeparateAccountManagement': float(new_sep_mgmt),
+                                        'base_date': new_base_date.strip(),
+                                        'base_debt': float(new_base_debt),
+                                        'base_surplus': float(new_base_surplus),
+                                        'manual_adjustment': float(new_manual_adj),
+                                        'adjustment_memo': new_adj_memo.strip(),
+                                        'auto_absorb_enabled': new_absorb_enabled,
+                                        'auto_absorb_limit': float(new_absorb_limit),
+                                        'auto_absorb_label': new_absorb_label.strip(),
+                                        'is_clean_start': new_is_clean,
+                                        'last_confirmed_date': '',
+                                        'BillingZip': new_bill_zip.strip(),
+                                        'BillingAddress': new_bill_address.strip(),
+                                        'BillingName': new_bill_name.strip()
+                                    }
+                                }
+                                db.upsert_tenants([new_record])
+                                st.success(f"🎉 新しい入居者「{new_name}」（物件番号: {next_pid}）を追加登録しました！")
+                                st.cache_data.clear()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"追加登録エラー: {e}")
+
             edited_df = st.data_editor(
                 tenants_df, 
                 use_container_width=True, 
-                num_rows="dynamic",
+                num_rows="fixed",
                 key="tenant_editor"
             )
             
