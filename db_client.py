@@ -84,7 +84,28 @@ class DBClient:
         else:
             raise Exception(f"Failed to update tenant {property_id}: {response.text}")
 
+    def delete_tenant(self, property_id, user_id=None):
+        """Delete a tenant by PropertyID, first deleting their associated payments to satisfy FK constraint."""
+        # 1. Delete payments
+        url_payments = f"{self.base_url}/rest/v1/payments?PropertyID=eq.{property_id}"
+        if user_id:
+            url_payments += f"&user_id=eq.{user_id}"
+        res_p = requests.delete(url_payments, headers=self.headers)
+        if res_p.status_code not in (200, 204):
+            raise Exception(f"Failed to delete payments for tenant {property_id}: {res_p.text}")
+            
+        # 2. Delete tenant
+        url_tenant = f"{self.base_url}/rest/v1/tenants?PropertyID=eq.{property_id}"
+        if user_id:
+            url_tenant += f"&user_id=eq.{user_id}"
+        res_t = requests.delete(url_tenant, headers=self.headers)
+        if res_t.status_code not in (200, 204):
+            raise Exception(f"Failed to delete tenant {property_id}: {res_t.text}")
+            
+        return True
+
     # ------------------------------------------------------------------
+
     # Payments
     # ------------------------------------------------------------------
 

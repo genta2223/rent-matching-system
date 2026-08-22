@@ -184,6 +184,23 @@ with tab1:
                             except Exception as e:
                                 st.error(f"追加登録エラー: {e}")
 
+            # Expander for deleting a tenant
+            with st.expander("🗑️ 入居者を削除する"):
+                delete_options = {f"{row['PropertyID']}: {row['Name']}": str(row['PropertyID']) for _, row in tenants_df.iterrows()}
+                selected_to_delete = st.selectbox("削除対象の入居者を選択してください", ["-- 選択してください --"] + list(delete_options.keys()))
+                if selected_to_delete != "-- 選択してください --":
+                    pid_to_delete = delete_options[selected_to_delete]
+                    st.warning(f"⚠️ 警告: 入居者「{selected_to_delete}」を削除すると、この物件番号に関連する請求書生成や延滞管理が行われなくなります。過去の入金データも同時にデータベースから完全に消去されます。")
+                    confirm_delete = st.checkbox("本当に削除します", key="confirm_delete_checkbox")
+                    if st.button("🔴 選択した入居者を削除", disabled=not confirm_delete):
+                        try:
+                            db.delete_tenant(pid_to_delete)
+                            st.success(f"🎉 入居者「{selected_to_delete}」をデータベースおよび関連データから正常に削除しました！")
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"削除エラー: {e}")
+
             edited_df = st.data_editor(
                 tenants_df, 
                 use_container_width=True, 
