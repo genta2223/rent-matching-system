@@ -34,6 +34,9 @@ def normalize_name(name):
     for prefix in ["振込　", "振込", "ﾂｲｶ", "ｻｲｿｳ"]:
         if name.startswith(prefix):
             name = name[len(prefix):]
+    # Normalize various hyphens, dashes, and prolonged sound marks
+    for ch in ['-', 'ー', '―', '‐', '–', '−', '─', '━']:
+        name = name.replace(ch, 'ｰ')
     return name.upper()
 
 def generate_tx_key(row):

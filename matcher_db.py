@@ -28,6 +28,9 @@ def normalize_name(name):
     for prefix in ["振込　", "振込", "ﾂｲｶ", "ｻｲｿｳ"]:
         if name.startswith(prefix):
             name = name[len(prefix):]
+    # Normalize various hyphens, dashes, and prolonged sound marks
+    for ch in ['-', 'ー', '―', '‐', '–', '−', '─', '━']:
+        name = name.replace(ch, 'ｰ')
     return name.upper()
 
 def generate_tx_key(row):
@@ -363,9 +366,9 @@ class TenantRecordDB:
                 'paid': int(d['paid'])
             })
         
-        # Format Ledger History — last 6 payments with allocation descriptions
+        # Format Ledger History — last 5 payments with allocation descriptions
         ledger_hist = []
-        for lp in self.ledger_payments[-6:]:
+        for lp in self.ledger_payments[-5:]:
              desc = str(lp.get('AllocationDesc', '') or '')
              if not desc:
                  continue

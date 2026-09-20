@@ -106,42 +106,60 @@ def create_invoice(tenant_data, output_path):
             c.setFont(font_name, 10)
         
     # --- 6. Recent Payments Received (from Ledger) ---
-    y -= 20
-    if y < 180: 
+    y -= 15
+    if y < 200: 
         c.showPage()
         y = height - 50
     
-    c.setFont(font_name, 12)
-    c.drawString(50, y, "【直近の入金履歴】")
-    y -= 25
-    c.setFont(font_name, 10)
+    c.setFont(font_name, 11)
+    c.drawString(50, y, "【直近の入金履歴】（最新5件）")
+    y -= 20
+    c.setFont(font_name, 9)
     c.drawString(70, y, "入金日")
     c.drawString(170, y, "金額")
     c.drawString(270, y, "摘要／充当内容")
-    c.line(50, y-10, width-50, y-10)
+    c.line(50, y-8, width-50, y-8)
     
-    y -= 30
-    for p in tenant_data.get('LedgerHistory', []):
-        row_y = y
-        c.drawString(70, row_y, p['Date'].strftime("%Y/%m/%d"))
-        c.drawString(170, row_y, f"¥ {int(p['Amount']):,}")
-        
-        # Wrapped Multi-line Allocation Description
+    y -= 22
+    history_items = tenant_data.get('LedgerHistory', [])[:5]
+    has_more = len(tenant_data.get('LedgerHistory', [])) > 5
+    was_truncated = False
+    
+    for p in history_items:
+        date_val = p['Date']
+        if not isinstance(date_val, str):
+            date_str = date_val.strftime("%Y/%m/%d")
+        else:
+            date_str = str(date_val).split(' ')[0].replace('-', '/')
+            
         desc = p.get('AllocationDesc', '')
         from reportlab.lib.utils import simpleSplit
-        lines = simpleSplit(desc, font_name, 10, width - 320) # 270px width
+        lines = simpleSplit(desc, font_name, 9, width - 320) # 270px width
+        
+        row_height = max(18, len(lines) * 11 + 4)
+        
+        # Check if row fits before footer line at y=135
+        if y - row_height < 145:
+            was_truncated = True
+            break
+            
+        row_y = y
+        c.setFont(font_name, 9)
+        c.drawString(70, row_y, date_str)
+        c.drawString(170, row_y, f"¥ {int(p['Amount']):,}")
         
         line_y = row_y
         for line in lines:
             c.drawString(270, line_y, line)
-            line_y -= 12
+            line_y -= 11
         
-        # Update y for next row based on number of lines
-        y = min(y - 25, line_y - 13)
-        
-        if y < 150: # Leave space for footer
-            c.drawString(50, y, "...(履歴が多い場合は省略されます)")
-            break
+        y -= row_height
+
+    if has_more or was_truncated:
+        c.setFont(font_name, 8)
+        c.setFillColorRGB(0.4, 0.4, 0.4)
+        c.drawString(50, max(y, 140), "※ 直近の入金を最大5件まで表示しています。")
+        c.setFillColorRGB(0, 0, 0)
 
     # --- 7. Footer / Bank Info ---
     footer_y = 120
