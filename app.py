@@ -308,19 +308,25 @@ with tab3:
             
             cols = bank_df.columns.tolist()
             header_hash = TemplateManager.get_header_hash(cols)
-            saved_template = TemplateManager.lookup(db, cols)
+            session_override_key = f"confirmed_mapping_{header_hash}"
             
-            if saved_template:
-                # Known template — skip confirmation
-                mapping = saved_template['mapping']
-                label = saved_template.get('label', '不明')
-                st.success(f"✅ 登録済みテンプレート「{label}」を適用します (ハッシュ: {header_hash[:8]})")
+            if session_override_key in st.session_state:
+                mapping = st.session_state[session_override_key]
+                st.info(f"ℹ️ 現在のセッションで確定済みのマッピングを適用中 (ハッシュ: {header_hash[:8]})")
                 needs_confirmation = False
             else:
-                # New layout — run heuristic detection
-                mapping = HeuristicMapper.suggest_mapping(bank_df)
-                st.warning(f"🔍 **新しいCSVレイアウトを検知しました** (ハッシュ: {header_hash[:8]})")
-                needs_confirmation = True
+                saved_template = TemplateManager.lookup(db, cols)
+                if saved_template:
+                    # Known template — skip confirmation
+                    mapping = saved_template['mapping']
+                    label = saved_template.get('label', '不明')
+                    st.success(f"✅ 登録済みテンプレート「{label}」を適用します (ハッシュ: {header_hash[:8]})")
+                    needs_confirmation = False
+                else:
+                    # New layout — run heuristic detection
+                    mapping = HeuristicMapper.suggest_mapping(bank_df)
+                    st.warning(f"🔍 **新しいCSVレイアウトを検知しました** (ハッシュ: {header_hash[:8]})")
+                    needs_confirmation = True
             
             # --- Step 3: Show mapping preview & allow manual override ---
             if needs_confirmation:
@@ -346,8 +352,8 @@ with tab3:
                         st.write(f"🏷 入出金フィルター: `{mapping['deposit_filter']}`")
                 
                 with col2:
-                    st.write("**CSVプレビュー (先頭3行)**")
-                    st.dataframe(bank_df.head(3), use_container_width=True)
+                    st.write("**CSVプレビュー (先頭30行)**")
+                    st.dataframe(bank_df.head(30), use_container_width=True)
                 
                 # Manual override
                 with st.expander("🔧 手動で修正する場合はこちら"):
@@ -372,11 +378,23 @@ with tab3:
                 # Template label and confirm
                 template_label = st.text_input("テンプレート名（例: りそな銀行）", value="")
                 
-                if st.button("✅ このマッピングで確定・保存"):
-                    TemplateManager.save_template(db, cols, mapping, label=template_label)
-                    st.success(f"テンプレート「{template_label}」を保存しました！次回から自動適用されます。")
-                    needs_confirmation = False
-                    st.rerun()
+                btn_col1, btn_col2 = st.columns(2)
+                with btn_col1:
+                    if st.button("✅ このマッピングで確定・保存", use_container_width=True):
+                        st.session_state[session_override_key] = mapping
+                        save_ok, save_msg = TemplateManager.save_template_safe(db, cols, mapping, label=template_label)
+                        if save_ok:
+                            st.success(f"テンプレート「{template_label}」を保存しました！次回から自動適用されます。")
+                        else:
+                            st.warning(f"⚠️ テンプレートのDB保存はスキップされました（{save_msg}）。今回の取り込み処理をそのまま続行します。")
+                        needs_confirmation = False
+                        st.rerun()
+                with btn_col2:
+                    if st.button("⏩ 保存をスキップして確定", use_container_width=True):
+                        st.session_state[session_override_key] = mapping
+                        st.info("マッピングを確定しました。入金処理へ進みます。")
+                        needs_confirmation = False
+                        st.rerun()
             
             # --- Step 4: Normalize and preview matched data ---
             if not needs_confirmation:
@@ -434,7 +452,12 @@ with tab3:
                     
                 # Option to reset template
                 if st.button("🗑 テンプレートをリセット"):
-                    TemplateManager.delete_template(db, cols)
+                    if session_override_key in st.session_state:
+                        del st.session_state[session_override_key]
+                    try:
+                        TemplateManager.delete_template(db, cols)
+                    except Exception:
+                        pass
                     st.info("テンプレートを削除しました。次回アップロード時に再確認されます。")
                     st.rerun()
 

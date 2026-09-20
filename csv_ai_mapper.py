@@ -354,6 +354,16 @@ class TemplateManager:
         )
 
     @staticmethod
+    def save_template_safe(db_client, columns: list, mapping: dict,
+                           label: str = '', user_id=None, shared: bool = False):
+        """Save a confirmed mapping safely without crashing on RLS/network errors."""
+        try:
+            TemplateManager.save_template(db_client, columns, mapping, label=label, user_id=user_id, shared=shared)
+            return True, "保存成功"
+        except Exception as e:
+            return False, str(e)
+
+    @staticmethod
     def delete_template(db_client, columns: list, user_id=None):
         """Delete a template by header hash."""
         header_hash = TemplateManager.get_header_hash(columns)
